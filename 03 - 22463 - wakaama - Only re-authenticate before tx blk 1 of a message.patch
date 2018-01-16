@@ -1,0 +1,59 @@
+From bcdc445b2e19cfd22cacce2f5c932c20f99f45d0 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Tue, 12 Dec 2017 15:09:42 -0800
+Subject: [PATCH] Only re-authenticate before tx blk 1 of a message
+
+Resolves: LE-8891
+Change-Id: I2d761b66aafe7982fa5342e11cd4058c4938173b
+Signed-off-by: David Clark <dclark@sierrawireless.com>
+---
+
+diff --git a/core/liblwm2m.h b/core/liblwm2m.h
+index 1aa700b..9ac4428 100644
+--- a/core/liblwm2m.h
++++ b/core/liblwm2m.h
+@@ -130,7 +130,7 @@
+ // sessionH: session handle identifying the peer (opaque to the core)
+ // buffer, length: data to send
+ // userData: parameter to lwm2m_init()
+-uint8_t lwm2m_buffer_send(void * sessionH, uint8_t * buffer, size_t length, void * userData);
++uint8_t lwm2m_buffer_send(void * sessionH, uint8_t * buffer, size_t length, void * userData, bool firstBlock);
+ // Compare two session handles
+ // Returns true if the two sessions identify the same peer. false otherwise.
+ // userData: parameter to lwm2m_init()
+diff --git a/core/packet.c b/core/packet.c
+index ec7ddcf..9c0dc20 100644
+--- a/core/packet.c
++++ b/core/packet.c
+@@ -859,7 +859,7 @@
+         LOG_ARG("coap_serialize_message() returned %d", pktBufferLen);
+         if (0 != pktBufferLen)
+         {
+-            result = lwm2m_buffer_send(sessionH, pktBuffer, pktBufferLen, contextP->userData);
++            result = lwm2m_buffer_send(sessionH, pktBuffer, pktBufferLen, contextP->userData, message->block1_num == 0);
+         }
+         lwm2m_free(pktBuffer);
+     }
+diff --git a/core/transaction.c b/core/transaction.c
+index 86adc6b..fed3b7d 100644
+--- a/core/transaction.c
++++ b/core/transaction.c
+@@ -387,7 +387,17 @@
+ 
+         if (COAP_MAX_RETRANSMIT + 1 >= transacP->retrans_counter)
+         {
+-            (void)lwm2m_buffer_send(transacP->peerH, transacP->buffer, transacP->buffer_len, contextP->userData);
++            uint32_t block1_num;
++            uint8_t  block1_more;
++            uint16_t block1_size;
++            coap_get_header_block1(transacP->message, &block1_num, &block1_more, &block1_size, NULL);
++            LOG_ARG("Send block num %u (SZX %u/ SZX Max%u) MORE %u",
++                                                            block1_num,
++                                                            block1_size,
++                                                            REST_MAX_CHUNK_SIZE,
++                                                            block1_more);
++
++            (void)lwm2m_buffer_send(transacP->peerH, transacP->buffer, transacP->buffer_len, contextP->userData, block1_num == 0);
+ 
+             transacP->retrans_time += timeout;
+             transacP->retrans_counter += 1;

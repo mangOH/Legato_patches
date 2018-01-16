@@ -1,0 +1,92 @@
+diff --git a/apps/tools/wifi/wifi/wifi_client.c b/apps/tools/wifi/wifi/wifi_client.c
+index 8776b80..85a41f4 100644
+--- a/apps/tools/wifi/wifi/wifi_client.c
++++ b/apps/tools/wifi/wifi/wifi_client.c
+@@ -96,17 +96,22 @@ static void WifiReadScanResults
+     {
+         do
+         {
++            char bssidBytes[LE_WIFIDEFS_MAX_BSSID_BYTES];
+             uint8_t ssidBytes[LE_WIFIDEFS_MAX_SSID_BYTES];
+             // Contains ssidNumElements number of bytes
+             size_t ssidNumElements = LE_WIFIDEFS_MAX_SSID_LENGTH;
+ 
+             if (LE_OK == (result = le_wifiClient_GetSsid(apRef,
+                 &ssidBytes[0],
+-                &ssidNumElements)))
++                &ssidNumElements)) &&
++                LE_OK == (result = le_wifiClient_GetBssid(apRef,
++                &bssidBytes[0],
++                sizeof(bssidBytes))))
+             {
+-                printf("Found:\tSSID:\t\"%.*s\"\tStrength:%d\tRef:%p\n",
++                printf("Found:\tSSID:\t\"%.*s\"\tBSSID:\t\"%s\"\tStrength:%d\tRef:%p\n",
+                     (int)ssidNumElements,
+                     (char *)&ssidBytes[0],
++                    (char *)&bssidBytes[0],
+                     le_wifiClient_GetSignalStrength(apRef),
+                     apRef);
+             }
+diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
+index 39b9e44..1362335 100644
+--- a/service/daemon/le_wifiClient.c
++++ b/service/daemon/le_wifiClient.c
+@@ -169,6 +169,47 @@ static le_wifiClient_AccessPointRef_t FindAccessPointRefFromSsid
+     return NULL;
+ }
+ 
++//--------------------------------------------------------------------------------------------------
++/**
++ * Local function to find an access point reference based on BSSID among the AP found in scan.
++ * If not found will return NULL.
++ */
++//--------------------------------------------------------------------------------------------------
++static le_wifiClient_AccessPointRef_t FindAccessPointRefFromBssid
++(
++    const char* bssidPtr
++        ///< [OUT]
++        ///< The BSSID returned as a byte array.
++)
++{
++    le_wifiClient_AccessPointRef_t apRef = NULL;
++    le_ref_IterRef_t               iter  = le_ref_GetIterator(ScanApRefMap);
++
++    LE_DEBUG("Find AP from BSSID");
++
++    while (le_ref_NextNode(iter) == LE_OK)
++    {
++        apRef = (le_wifiClient_AccessPointRef_t)le_ref_GetSafeRef(iter);
++        if (NULL != apRef)
++        {
++            FoundAccessPoint_t *apPtr = (FoundAccessPoint_t *)le_ref_Lookup(ScanApRefMap, apRef);
++            if (NULL != apPtr)
++            {
++                if (0 == memcmp(apPtr->accessPoint.bssidBytes, bssidPtr, 
++                                sizeof(apPtr->accessPoint.bssidBytes)))
++                {
++                    LE_DEBUG("Found apRef %p", apRef);
++                    return apRef;
++                }
++            }
++        }
++        else
++        {
++            LE_ERROR("ERROR le_ref_GetSafeRef returned NULL iter:%p", iter);
++        }
++    }
++    return NULL;
++}
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+@@ -182,9 +223,7 @@ static le_wifiClient_AccessPointRef_t AddAccessPointToApRefMap
+ )
+ {
+     // first see if it alreay exists in our list of reference.
+-    le_wifiClient_AccessPointRef_t returnedRef = FindAccessPointRefFromSsid(
+-        apPtr->ssidBytes,
+-        apPtr->ssidLength);
++    le_wifiClient_AccessPointRef_t returnedRef = FindAccessPointRefFromBssid(apPtr->bssidBytes);
+ 
+     if (NULL != returnedRef)
+     {

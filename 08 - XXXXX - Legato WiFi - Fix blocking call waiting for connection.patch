@@ -1,0 +1,90 @@
+diff --git a/service/platformAdaptor/ti/pa_wifi.sh b/service/platformAdaptor/ti/pa_wifi.sh
+index 2da387a..5f42e89 100644
+--- a/service/platformAdaptor/ti/pa_wifi.sh
++++ b/service/platformAdaptor/ti/pa_wifi.sh
+@@ -35,25 +35,6 @@ WPA_DRIVER=$4
+ # PATH
+ export PATH=/legato/systems/current/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+ 
+-# Check the connection on the WiFi network interface.
+-# Exit with 0 if connected otherwise exit with 30 (number of retries)
+-CheckConnection()
+-{
+-    retries=30
+-    echo "Checking connection..."
+-    # Verify connection status
+-    for i in $(seq 1 ${retries})
+-    do
+-      echo "loop=${i}"
+-      (/usr/sbin/iw $1 link | grep "Connected to") && break
+-      sleep 1
+-    done
+-    if [ "${i}" -eq "${retries}" ]; then
+-        exit ${retries}
+-    fi
+-    exit 0
+-}
+-
+ case ${CMD} in
+   WIFI_START)
+     echo "WIFI_START"
+@@ -135,8 +116,7 @@ case ${CMD} in
+     /sbin/wpa_supplicant -d -D${WPA_DRIVER} -c /tmp/${WPA_CFG} -i${IFACE} -B || exit 99
+ 
+     /sbin/wpa_cli -i${IFACE} status
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   WIFICLIENT_CONNECT_SECURITY_WEP)
+     echo "WIFICLIENT_CONNECT_SECURITY_WEP mode"
+@@ -158,8 +138,7 @@ case ${CMD} in
+     (/sbin/wpa_cli -i${IFACE} enable_network 0 | grep OK) || exit 8
+     (/sbin/wpa_cli -i${IFACE} reassociate | grep OK) || exit 9
+     /sbin/wpa_cli -i${IFACE} status
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL)
+     echo "WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL mode"
+@@ -173,8 +152,7 @@ case ${CMD} in
+ 
+     # Run wpa_supplicant daemon
+     (/sbin/wpa_supplicant -d -D${WPA_DRIVER} -c /tmp/${WPA_CFG} -i${IFACE} -B) || exit 99
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL)
+     echo "WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL mode"
+@@ -190,8 +168,7 @@ case ${CMD} in
+     (/sbin/wpa_supplicant -d -D${WPA_DRIVER} -c /tmp/${WPA_CFG} -i${IFACE} -B) || exit 99
+ 
+     /sbin/wpa_cli -i${IFACE} status
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE)
+     ID=$4
+@@ -221,8 +198,7 @@ case ${CMD} in
+     (/sbin/wpa_cli -i${IFACE} enable_network 0 | grep OK) || exit 15
+     (/sbin/wpa_cli -i${IFACE} reassociate | grep OK) || exit 16
+     /sbin/wpa_cli -i${IFACE} status
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE)
+     ID=$5
+@@ -252,8 +228,7 @@ case ${CMD} in
+     (/sbin/wpa_cli -i${IFACE} enable_network 0 | grep OK) || exit 15
+     (/sbin/wpa_cli -i${IFACE} reassociate | grep OK) || exit 16
+     /sbin/wpa_cli -i${IFACE} status
+-
+-    CheckConnection ${IFACE} ;;
++    exit 0 ;;
+ 
+   *)
+     echo "Parameter not valid"

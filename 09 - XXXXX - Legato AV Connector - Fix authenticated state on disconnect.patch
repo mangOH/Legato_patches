@@ -1,0 +1,12 @@
+diff --git a/avcClient/avcClient.c b/avcClient/avcClient.c
+index 0cb040d..5524f12 100644
+--- a/avcClient/avcClient.c
++++ b/avcClient/avcClient.c
+@@ -304,6 +304,7 @@ static void ConnectionStateHandler
+             // Call the callback.
+             BearerEventCb(connected, contextPtr);
+             DataConnected = false;
++            AuthenticationPhase = false;
+         }
+     }
+ }
