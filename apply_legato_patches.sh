@@ -52,6 +52,9 @@ apply_patch \
 apply_patch \
     "08 - XXXXX - Legato WiFi - Fix blocking call waiting for connection.patch" \
     "modules/WiFi"
-
+apply_patch \
+    "09 - XXXXX - Legato AV Connector - Fix session started state on disconnect.patch" \
+    "apps/platformServices/airVantageConnector"
+    
 echo "==========================="
 echo "All patches applied successfully"
