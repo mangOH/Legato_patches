@@ -55,6 +55,9 @@ apply_patch \
 apply_patch \
     "09 - XXXXX - Legato AV Connector - Fix session started state on disconnect.patch" \
     "apps/platformServices/airVantageConnector"
+apply_patch \
+    "10 - XXXXX - Legato AV Connector - Fix unhandled update state.patch" \
+    "apps/platformServices/airVantageConnector"
     
 echo "==========================="
 echo "All patches applied successfully"
