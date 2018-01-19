@@ -32,13 +32,13 @@ apply_patch \
     "01 - 22456 - Legato WiFi - Add support for multiple wlan interfaces.patch" \
     "modules/WiFi"
 apply_patch \
-    "02 - 22462 - wakaama - Continue retrying block when 408 error is received.patch" \
+    "02 - 22463 - wakaama - Only re-authenticate before tx blk 1 of a message.patch" \
     "3rdParty/Lwm2mCore/wakaama"
 apply_patch \
-    "03 - 22463 - wakaama - Only re-authenticate before tx blk 1 of a message.patch" \
+    "03 - 22461 - wakaama - Fix bug in ACK handling.patch" \
     "3rdParty/Lwm2mCore/wakaama"
 apply_patch \
-    "04 - 22461 - wakaama - Fix bug in ACK handling.patch" \
+    "04 - 22462 - wakaama - Continue retrying block when 408 error is received.patch" \
     "3rdParty/Lwm2mCore/wakaama"
 apply_patch \
     "05 - 22460 - lwmwmcore - Only re-authenticate before tx blk 1 of a message.patch" \
