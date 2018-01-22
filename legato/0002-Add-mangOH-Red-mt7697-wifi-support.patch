@@ -1,7 +1,7 @@
-From c37c0e3007425ef9cda1e649e173565a9d13c478 Mon Sep 17 00:00:00 2001
+From e7048a92c559e1d7014ac5382235c0ba1990d130 Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
-Date: Fri, 03 Nov 2017 10:16:34 -0700
-Subject: [PATCH] Add mangOH Red mt7697 wifi support
+Date: Fri, 3 Nov 2017 10:16:34 -0700
+Subject: [PATCH 2/2] Add mangOH Red mt7697 wifi support
 
 The data connection service and wifi client/AP have been updated to support the
 mt7697 WiFi on the mangOH Red.
@@ -10,9 +10,16 @@ Resolves: LE-8890
 Change-Id: I5c712b2614e23c914225449507210eb093b392c3
 Signed-off-by: David Clark <dclark@sierrawireless.com>
 ---
+ .../dataConnectionUnitTest/interfaces.h            |   8 +-
+ .../dataConnectionUnitTest/main.c                  |   2 +
+ .../dataConnectionService/dcsDaemon/dcsServer.c    | 205 +++++++++++++++------
+ interfaces/wifi/le_wifiAp.api                      |  67 ++++++-
+ interfaces/wifi/le_wifiClient.api                  |  65 ++++++-
+ interfaces/wifi/le_wifiDefs.api                    |  23 +++
+ 6 files changed, 309 insertions(+), 61 deletions(-)
 
 diff --git a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
-index 262ca31..3abc472 100644
+index 262ca3114..3abc472e1 100644
 --- a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
 +++ b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
 @@ -32,9 +32,11 @@
@@ -31,10 +38,10 @@ index 262ca31..3abc472 100644
  //--------------------------------------------------------------------------------------------------
  /**
 diff --git a/apps/test/dataConnectionService/dataConnectionUnitTest/main.c b/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
-index 270b8a4..dfdc3a4 100644
+index 270b8a4e0..dfdc3a41e 100644
 --- a/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
 +++ b/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
-@@ -500,6 +500,8 @@
+@@ -500,6 +500,8 @@ static void Testle_data_Service
      le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_SSID, "TestSSID");
      le_cfgTest_SetIntNodeValue(wifiTestIteratorRef, CFG_NODE_SECPROTOCOL, 3);
      le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_PASSPHRASE, "pa$$w0rd");
@@ -44,7 +51,7 @@ index 270b8a4..dfdc3a4 100644
      LE_INFO("Simulate cellular disconnection");
  
 diff --git a/components/dataConnectionService/dcsDaemon/dcsServer.c b/components/dataConnectionService/dcsDaemon/dcsServer.c
-index 1edad3b..73c7d9c 100644
+index 1edad3b73..3a3bc6007 100644
 --- a/components/dataConnectionService/dcsDaemon/dcsServer.c
 +++ b/components/dataConnectionService/dcsDaemon/dcsServer.c
 @@ -50,15 +50,17 @@
@@ -74,28 +81,25 @@ index 1edad3b..73c7d9c 100644
  #define CFG_PATH_TIME               "time"
  #define CFG_NODE_PROTOCOL           "protocol"
  #define CFG_NODE_SERVER             "server"
-@@ -85,14 +87,6 @@
-  */
+@@ -88,14 +90,6 @@
+ 
  //--------------------------------------------------------------------------------------------------
- #define DCS_TECH_NUMBER     LE_DATA_MAX
--
--//--------------------------------------------------------------------------------------------------
--/**
+ /**
 - * Wifi interface name
 - * TODO: Should be retrieved from Wi-Fi client. To modify when API is available.
 - */
 -//--------------------------------------------------------------------------------------------------
 -#define WIFI_INTF "wlan0"
+-
+-//--------------------------------------------------------------------------------------------------
+-/**
+  * Maximal number of retries to stop the data session
+  */
+ //--------------------------------------------------------------------------------------------------
+@@ -236,6 +230,20 @@ static le_wifiClient_NewEventHandlerRef_t WifiEventHandlerRef = NULL;
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -233,6 +227,20 @@
-  */
- //--------------------------------------------------------------------------------------------------
- static le_wifiClient_NewEventHandlerRef_t WifiEventHandlerRef = NULL;
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
 + * WiFi WPA Supplicant Driver used for the wifi connection
 + */
 +//--------------------------------------------------------------------------------------------------
@@ -107,10 +111,13 @@ index 1edad3b..73c7d9c 100644
 + */
 +//--------------------------------------------------------------------------------------------------
 +static char WiFiInterface[LE_WIFIDEFS_MAX_INTERFACE_BYTES] = {0};
- 
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * SSID of the Access Point used for the wifi connection
+  */
  //--------------------------------------------------------------------------------------------------
- /**
-@@ -507,7 +515,7 @@
+@@ -507,7 +515,7 @@ static void SendConnStateEvent
              break;
  
          case LE_DATA_WIFI:
@@ -119,7 +126,7 @@ index 1edad3b..73c7d9c 100644
              break;
  
          default:
-@@ -516,7 +524,7 @@
+@@ -516,7 +524,7 @@ static void SendConnStateEvent
              break;
      }
  
@@ -128,18 +135,18 @@ index 1edad3b..73c7d9c 100644
          eventData.interfaceName,
          eventData.isConnected);
  
-@@ -596,13 +604,17 @@
+@@ -596,13 +604,17 @@ static void WifiClientEventHandler
              // and update connection status
              if ((LE_DATA_WIFI == CurrentTech) && (RequestCount > 0))
              {
 -                if (LE_OK == pa_dcs_AskForIpAddress(WIFI_INTF))
-+                if (LE_OK == le_wifiClient_GetInterface(AccessPointRef, WiFiInterface, 
-+                                                        sizeof(WiFiInterface)))
-                 {
+-                {
 -                    IsConnected = true;
 -                }
 -                else
--                {
++                if (LE_OK == le_wifiClient_GetInterface(AccessPointRef, WiFiInterface,
++                                                        sizeof(WiFiInterface)))
+                 {
 -                    IsConnected = false;
 +                    if (LE_OK == pa_dcs_AskForIpAddress(WiFiInterface))
 +                    {
@@ -152,18 +159,18 @@ index 1edad3b..73c7d9c 100644
                  }
              }
              else
-@@ -629,7 +641,22 @@
+@@ -629,7 +641,22 @@ static void WifiClientEventHandler
              break;
  
          case LE_WIFICLIENT_EVENT_SCAN_DONE:
 -            LE_DEBUG("Wifi client: scan done");
 +            LE_INFO("Wifi client: scan done");
 +
-+    	    // Connect to the Access Point
++            // Connect to the Access Point
 +            le_result_t result = le_wifiClient_Connect(AccessPointRef);
-+    	    if (LE_OK != result)
++            if (LE_OK != result)
 +            {
-+        	LE_ERROR("Impossible to connect to AP, result %d (%s)", result, LE_RESULT_TXT(result));
++                LE_ERROR("Impossible to connect to AP, result %d (%s)", result, LE_RESULT_TXT(result));
 +
 +                // Impossible to use this technology, try the next one
 +                ConnectionStatusHandler(LE_DATA_WIFI, false);
@@ -176,7 +183,7 @@ index 1edad3b..73c7d9c 100644
              break;
  
          default:
-@@ -712,9 +739,9 @@
+@@ -712,9 +739,9 @@ static int32_t GetDataProfileIndex
      le_cfg_IteratorRef_t cfg = le_cfg_CreateReadTxn(configPath);
  
      // Get Cid Profile
@@ -188,7 +195,7 @@ index 1edad3b..73c7d9c 100644
          LE_DEBUG("Use data profile index %d", index);
      }
      le_cfg_CancelTxn(cfg);
-@@ -761,7 +788,7 @@
+@@ -761,7 +788,7 @@ static void SetDataProfileIndex
  
      le_cfg_IteratorRef_t cfg = le_cfg_CreateWriteTxn(configPath);
      // Set Cid Profile
@@ -197,28 +204,24 @@ index 1edad3b..73c7d9c 100644
      le_cfg_CommitTxn(cfg);
  }
  
-@@ -940,53 +967,94 @@
+@@ -940,53 +967,94 @@ static le_result_t LoadSelectedTechProfile
              le_cfg_IteratorRef_t cfg = le_cfg_CreateReadTxn(configPath);
  
              // SSID
 -            if (le_cfg_NodeExists(cfg, CFG_NODE_SSID))
 +            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_SSID))
-             {
--                if (LE_OK != le_cfg_GetString(cfg, CFG_NODE_SSID, Ssid, sizeof(Ssid), "testSsid"))
-+                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_SSID, Ssid, sizeof(Ssid), 
++            {
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_SSID, Ssid, sizeof(Ssid),
 +                                              "testSsid"))
-                 {
--                    LE_WARN("String value for '%s' too large", CFG_NODE_SSID);
++                {
 +                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_SSID);
-                     le_cfg_CancelTxn(cfg);
-                     return LE_OVERFLOW;
-                 }
--                LE_DEBUG("AP configuration, SSID: '%s'", Ssid);
++                    le_cfg_CancelTxn(cfg);
++                    return LE_OVERFLOW;
++                }
 +                LE_INFO("AP configuration, SSID: '%s'", Ssid);
-             }
-             else
-             {
--                LE_WARN("No value set for '%s'!", CFG_NODE_SSID);
++            }
++            else
++            {
 +                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_SSID);
 +                le_cfg_CancelTxn(cfg);
 +                return LE_NOT_FOUND;
@@ -227,7 +230,7 @@ index 1edad3b..73c7d9c 100644
 +            // WiFi Interface
 +            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_INTERFACE))
 +            {
-+                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_INTERFACE, WiFiInterface, 
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_INTERFACE, WiFiInterface,
 +                                              sizeof(WiFiInterface), "testInterface"))
 +                {
 +                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_INTERFACE);
@@ -245,19 +248,23 @@ index 1edad3b..73c7d9c 100644
 +
 +            // Wpa Supplicant Driver
 +            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER))
-+            {
-+                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER, 
-+                                              WpaSupplicantDriver, sizeof(WpaSupplicantDriver), 
+             {
+-                if (LE_OK != le_cfg_GetString(cfg, CFG_NODE_SSID, Ssid, sizeof(Ssid), "testSsid"))
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER,
++                                              WpaSupplicantDriver, sizeof(WpaSupplicantDriver),
 +                                              "testWpaSupplicantDriver"))
-+                {
+                 {
+-                    LE_WARN("String value for '%s' too large", CFG_NODE_SSID);
 +                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER);
-+                    le_cfg_CancelTxn(cfg);
-+                    return LE_OVERFLOW;
-+                }
+                     le_cfg_CancelTxn(cfg);
+                     return LE_OVERFLOW;
+                 }
+-                LE_DEBUG("AP configuration, SSID: '%s'", Ssid);
 +                LE_INFO("AP configuration, WPA Supplicant driver: '%s'", WpaSupplicantDriver);
-+            }
-+            else
-+            {
+             }
+             else
+             {
+-                LE_WARN("No value set for '%s'!", CFG_NODE_SSID);
 +                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER);
                  le_cfg_CancelTxn(cfg);
                  return LE_NOT_FOUND;
@@ -307,7 +314,7 @@ index 1edad3b..73c7d9c 100644
                  le_cfg_CancelTxn(cfg);
                  return LE_NOT_FOUND;
              }
-@@ -999,8 +1067,36 @@
+@@ -999,8 +1067,36 @@ static le_result_t LoadSelectedTechProfile
              if (NULL != AccessPointRef)
              {
                  // Configure the Access Point
@@ -319,7 +326,7 @@ index 1edad3b..73c7d9c 100644
 +                    LE_ERROR("le_wifiClient_SetInterface() failed(%d)", result);
 +                    return result;
 +                }
-+ 
++
 +                result = le_wifiClient_SetSecurityProtocol(AccessPointRef, SecProtocol);
 +                if (result != LE_OK)
 +                {
@@ -346,7 +353,7 @@ index 1edad3b..73c7d9c 100644
  
                  // Register for Wifi Client state changes if not already done
                  if (NULL == WifiEventHandlerRef)
-@@ -1016,6 +1112,8 @@
+@@ -1016,6 +1112,8 @@ static le_result_t LoadSelectedTechProfile
              }
  
              // Delete sensitive information
@@ -355,7 +362,7 @@ index 1edad3b..73c7d9c 100644
              memset(Ssid, '\0', sizeof(Ssid));
              memset(Passphrase, '\0', sizeof(Passphrase));
          }
-@@ -1354,19 +1452,17 @@
+@@ -1354,19 +1452,17 @@ static void TryStartWifiSession
          return;
      }
  
@@ -378,7 +385,7 @@ index 1edad3b..73c7d9c 100644
  }
  
  //--------------------------------------------------------------------------------------------------
-@@ -1441,6 +1537,8 @@
+@@ -1441,6 +1537,8 @@ static void TryStopDataSession
      le_mdc_ConState_t sessionState;
      le_result_t result;
  
@@ -387,7 +394,7 @@ index 1edad3b..73c7d9c 100644
      // Check if the mobile data session is already disconnected
      result = le_mdc_GetSessionState(MobileProfileRef, &sessionState);
      if ((LE_OK == result) && (!sessionState))
-@@ -1500,7 +1598,9 @@
+@@ -1500,7 +1598,9 @@ static void TryStopWifiSession
      le_timer_Ref_t timerRef     ///< [IN] Timer used to ensure the end of the session
  )
  {
@@ -398,7 +405,7 @@ index 1edad3b..73c7d9c 100644
      {
          LE_ERROR("Impossible to disconnect wifi client");
  
-@@ -1538,6 +1638,7 @@
+@@ -1538,6 +1638,7 @@ static void TryStopTechSession
      }
      else
      {
@@ -407,10 +414,10 @@ index 1edad3b..73c7d9c 100644
          {
              case LE_DATA_CELLULAR:
 diff --git a/interfaces/wifi/le_wifiAp.api b/interfaces/wifi/le_wifiAp.api
-index ebdee1a..a9402d1 100644
+index ebdee1a3c..a9402d196 100644
 --- a/interfaces/wifi/le_wifiAp.api
 +++ b/interfaces/wifi/le_wifiAp.api
-@@ -102,6 +102,16 @@
+@@ -102,6 +102,16 @@ ENUM SecurityProtocol
      SECURITY_WPA2    ///< WiFi Access Point has WPA2 activated.
  };
  
@@ -427,7 +434,7 @@ index ebdee1a..a9402d1 100644
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -124,9 +134,10 @@
+@@ -124,9 +134,10 @@ EVENT NewEvent
      EventHandler handler
  );
  
@@ -439,7 +446,7 @@ index ebdee1a..a9402d1 100644
   * This function starts the WIFI Access Point.
   * @note that all settings, if to be used, such as security, username, password must set prior to
   * starting the Access Point.
-@@ -143,6 +154,25 @@
+@@ -143,6 +154,25 @@ FUNCTION le_result_t Start
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -465,14 +472,10 @@ index ebdee1a..a9402d1 100644
   * This function stops the WIFI Access Point.
   *
   * @return
-@@ -153,6 +183,21 @@
+@@ -157,6 +187,21 @@ FUNCTION le_result_t Stop
+ 
  //--------------------------------------------------------------------------------------------------
- FUNCTION le_result_t Stop
- (
-+);
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
+ /**
 + * This function stops the WIFI Access Point.
 + *
 + * @return
@@ -484,10 +487,14 @@ index ebdee1a..a9402d1 100644
 +FUNCTION le_result_t StopInterface
 +(
 +    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface to set as a octet array.
- );
- 
- //--------------------------------------------------------------------------------------------------
-@@ -173,9 +218,23 @@
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the Service set identification (SSID) of the AccessPoint
+  * Default value is "LEGATO Access Point"
+  * @note that the SSID does not have to be human readable ASCII values, but often has.
+@@ -173,9 +218,23 @@ FUNCTION le_result_t SetSsid
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -512,15 +519,15 @@ index ebdee1a..a9402d1 100644
   *
   * @return
   *      - LE_BAD_PARAMETER if some parameter is invalid.
-@@ -186,7 +245,6 @@
- (
-     SecurityProtocol securityProtocol IN ///< The security protocol to use.
- );
+@@ -189,7 +248,6 @@ FUNCTION le_result_t SetSecurityProtocol
+ 
+ 
+ 
 -
- 
- 
- 
-@@ -287,5 +345,6 @@
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Set the passphrase used to generate the PSK.
+@@ -287,5 +345,6 @@ FUNCTION le_result_t SetIpRange
  (
      string ipAp[le_wifiDefs.MAX_IP_LENGTH] IN, ///< the IP address of the Access Point.
      string ipStart[le_wifiDefs.MAX_IP_LENGTH] IN, ///< the start IP address of the Access Point.
@@ -529,10 +536,10 @@ index ebdee1a..a9402d1 100644
 +    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface of the Access Point.
  );
 diff --git a/interfaces/wifi/le_wifiClient.api b/interfaces/wifi/le_wifiClient.api
-index b9ef96c..08b117f 100644
+index 4bcfafa5a..7925d7f38 100644
 --- a/interfaces/wifi/le_wifiClient.api
 +++ b/interfaces/wifi/le_wifiClient.api
-@@ -197,6 +197,17 @@
+@@ -197,6 +197,17 @@ REFERENCE AccessPoint;
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -550,40 +557,16 @@ index b9ef96c..08b117f 100644
   * WiFi Client Events.
   */
  //--------------------------------------------------------------------------------------------------
-@@ -221,7 +232,6 @@
-     SECURITY_WPA_EAP_PEAP0_ENTERPRISE,  ///< Using WPA Enterprise
-     SECURITY_WPA2_EAP_PEAP0_ENTERPRISE  ///< Using WPA2 Enterprise
+@@ -223,7 +234,6 @@ ENUM SecurityProtocol
  };
+ 
+ 
 -
- 
- 
- //--------------------------------------------------------------------------------------------------
-@@ -339,6 +349,23 @@
- 
  //--------------------------------------------------------------------------------------------------
  /**
-+ * Get the BSSID of the AccessPoint
-+ *
-+ * @return
-+ *      - LE_FAULT if the function failed.
-+ *      - LE_BAD_PARAMETER if some parameter is invalid.
-+ *      - LE_OK if the function succeeded.
-+ */
-+//--------------------------------------------------------------------------------------------------
-+FUNCTION le_result_t GetBssid
-+(
-+    AccessPoint accessPointRef IN,  ///< WiFi Access Point reference.
-+    string Bssid[le_wifiDefs.MAX_BSSID_BYTES] OUT ///< The BSSID
-+);
-+
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
-  * Get the Service set identification (SSID) of the AccessPoint
-  * @note that the SSID does not have to be human readable ASCII values, but often has.
-  *
-@@ -354,7 +381,23 @@
-     uint8 Ssid[le_wifiDefs.MAX_SSID_BYTES] OUT ///< The SSID returned as a octet array.
+  * Handler for WiFi Client changes
+@@ -370,7 +380,23 @@ FUNCTION le_result_t GetSsid
+     uint8 ssid[le_wifiDefs.MAX_SSID_BYTES] OUT ///< The SSID returned as a octet array.
  );
  
 -
@@ -607,14 +590,10 @@ index b9ef96c..08b117f 100644
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -373,6 +416,40 @@
- (
-     AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
-     string PassPhrase[le_wifiDefs.MAX_PASSPHRASE_BYTES] IN ///< pass-phrase for PSK
-+);
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
+@@ -393,6 +419,40 @@ FUNCTION le_result_t SetPassphrase
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * Set the wireless interface.
 + *
 + * @return
@@ -645,31 +624,27 @@ index b9ef96c..08b117f 100644
 +(
 +    AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
 +    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] OUT ///< The WiFi interface.
- );
- 
- //--------------------------------------------------------------------------------------------------
-@@ -507,4 +584,5 @@
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the Pre Shared Key, PSK.
+  * @note the difference between le_wifiClient_SetPassphrase() and this function
+  *
+@@ -523,4 +583,5 @@ FUNCTION le_result_t Connect
  //--------------------------------------------------------------------------------------------------
  FUNCTION le_result_t Disconnect
  (
 +    AccessPoint accessPointRef IN  ///< WiFi Access Point reference.
  );
 diff --git a/interfaces/wifi/le_wifiDefs.api b/interfaces/wifi/le_wifiDefs.api
-index 57481e9..d5e8bb1 100644
+index bd5b986e0..651b44168 100644
 --- a/interfaces/wifi/le_wifiDefs.api
 +++ b/interfaces/wifi/le_wifiDefs.api
-@@ -135,3 +135,34 @@
+@@ -150,3 +150,26 @@ DEFINE MAX_BSSID_LENGTH      = 17;
+  */
  //--------------------------------------------------------------------------------------------------
- DEFINE MAX_SSID_BYTES        = (MAX_SSID_LENGTH + 1);
- 
-+//--------------------------------------------------------------------------------------------------
-+/**
-+ * The maximum length of octets of the BSSID.
-+ * @note While the values are probably human readable, this is not a string.
-+ */
-+//--------------------------------------------------------------------------------------------------
-+DEFINE MAX_BSSID_LENGTH      = 17;
-+DEFINE MAX_BSSID_BYTES       = (MAX_BSSID_LENGTH + 1);
+ DEFINE MAX_BSSID_BYTES       = (MAX_BSSID_LENGTH + 1);
 +
 +//--------------------------------------------------------------------------------------------------
 +/**
@@ -693,3 +668,6 @@ index 57481e9..d5e8bb1 100644
 +//--------------------------------------------------------------------------------------------------
 +DEFINE MAX_WPA_SUPPLICANT_DRIVER_LENGTH = 8;
 +DEFINE MAX_WPA_SUPPLICANT_DRIVER_BYTES  = (MAX_WPA_SUPPLICANT_DRIVER_LENGTH + 1);
+-- 
+2.11.0
+

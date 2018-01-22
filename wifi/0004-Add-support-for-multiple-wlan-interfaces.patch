@@ -1,7 +1,7 @@
-From 82bafd8b1b925fc978e4f94c1b27a0ac2ae83210 Mon Sep 17 00:00:00 2001
+From 9b4b70a7d6b71794b503dcbf40366705d7f101ee Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Tue, 12 Dec 2017 14:12:30 -0800
-Subject: [PATCH] Add support for multiple wlan interfaces
+Subject: [PATCH 4/4] Add support for multiple wlan interfaces
 
 The wifi service and wifi web application now suport dynamic selection of the
 interface and wpa_supplicant driver.
@@ -10,6 +10,23 @@ Resolves: LE-8890
 Change-Id: Id4d8f4710d73a9a53c6f80c44123cd925d334a97
 Signed-off-by: David Clark <dclark@sierrawireless.com>
 ---
+ .../wifiApTest/wifiApTestComponent/wifiApTest.c    |  14 +-
+ .../wifiClientTestComponent/wifiClientTest.c       |  16 +-
+ .../wifiWebAp/wifiWebApComponent/wifiWebAp.c       |   4 +-
+ .../wifiWebApComponent/www/cgi-bin/startwifiap     |  28 +-
+ .../wifiWebApComponent/www/cgi-bin/wifiexport      |   2 +-
+ .../wifiWebAp/wifiWebApComponent/www/index.html    |  10 +-
+ apps/tools/wifi/wifi/wifi_ap.c                     | 110 ++++-
+ apps/tools/wifi/wifi/wifi_client.c                 |  92 +++-
+ service/daemon/le_wifiAp.c                         |  75 +++-
+ service/daemon/le_wifiClient.c                     | 143 ++++++-
+ service/platformAdaptor/inc/pa_wifi.h              |  53 +++
+ service/platformAdaptor/inc/pa_wifi_ap.h           |  28 +-
+ service/platformAdaptor/ti/pa_wifi.sh              |  78 ++--
+ service/platformAdaptor/ti/pa_wifi_ap_ti.c         | 357 +++++++++++-----
+ service/platformAdaptor/ti/pa_wifi_client_ti.c     | 476 +++++++++++++++------
+ .../platformAdaptor/ti_simu/pa_wifi_client_ti.c    | 176 ++++++--
+ 16 files changed, 1296 insertions(+), 366 deletions(-)
 
 diff --git a/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c b/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c
 index c97fb35..2f2bdcc 100644
@@ -25,18 +42,18 @@ index c97fb35..2f2bdcc 100644
  
  #define TEST_SECU_PROTO LE_WIFIAP_SECURITY_WPA2
  #define TEST_PASSPHRASE "passphrase"
-@@ -48,6 +49,10 @@
- #define ITF_LAN "wlan0"
+@@ -49,6 +50,10 @@
  // bridge interface to access the Internet (WAN - Wide Area Network)
  #define ITF_WAN "eth0"
-+
+ 
 +// defines because the WiFi interface is actually uint8 not char.
 +#define TEST_INTERFACE           ((const uint8_t *)TEST_INTERFACE_STR)
 +#define TEST_INTERFACE_NBR_BYTES (sizeof(TEST_SSID_STR)-1)
- 
++
  // defines because the SSID is actually uint8 not char.
  #define TEST_SSID           ((const uint8_t *)TEST_SSID_STR)
-@@ -209,7 +214,7 @@
+ #define TEST_SSID_NBR_BYTES (sizeof(TEST_SSID_STR)-1)
+@@ -209,7 +214,7 @@ void Testle_wifiApStart
  
      Testle_setCredentials();
  
@@ -45,7 +62,7 @@ index c97fb35..2f2bdcc 100644
      {
          LE_INFO("Start OK");
  
-@@ -220,7 +225,8 @@
+@@ -220,7 +225,8 @@ void Testle_wifiApStart
          LE_ERROR("Start ERROR");
      }
  
@@ -55,7 +72,7 @@ index c97fb35..2f2bdcc 100644
  }
  //! [Subscribe]
  
-@@ -238,7 +244,7 @@
+@@ -238,7 +244,7 @@ static void Testle_wifiApStop
      LE_INFO("WIFI AP STOP : Received signal %d", signalId);
  
      // Stop the AP
@@ -87,7 +104,7 @@ index 6142f3f..501f4f5 100644
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -56,7 +57,8 @@
+@@ -56,7 +57,8 @@ static void AskForIpAddress
      snprintf(tmpString,
          sizeof(tmpString),
          "PATH=/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin;"
@@ -97,7 +114,7 @@ index 6142f3f..501f4f5 100644
     );
  
      systemResult = system(tmpString);
-@@ -169,6 +171,8 @@
+@@ -169,6 +171,8 @@ static void TestConnect
      {
          LE_DEBUG(" test AP valid  ");
  
@@ -110,7 +127,7 @@ diff --git a/apps/sample/wifiWebAp/wifiWebApComponent/wifiWebAp.c b/apps/sample/
 index e5d1f3f..c87d351 100644
 --- a/apps/sample/wifiWebAp/wifiWebApComponent/wifiWebAp.c
 +++ b/apps/sample/wifiWebAp/wifiWebApComponent/wifiWebAp.c
-@@ -297,9 +297,10 @@
+@@ -297,9 +297,10 @@ static void StopWebServer
      LE_INFO("StopWebServer : Received signal %d", signalId);
      LE_INFO("StopWebServer : Killing of instance of httpd server");
      RunSystemCommand("killall httpd");
@@ -122,7 +139,7 @@ index e5d1f3f..c87d351 100644
  
      // Turn off IP forwarding
      LE_INFO("Disabling IP forwarding");
-@@ -330,6 +331,7 @@
+@@ -330,6 +331,7 @@ COMPONENT_INIT
      // Set the environment
      putenv("PATH=/legato/systems/current/bin:"
          "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin");
@@ -134,7 +151,7 @@ diff --git a/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/startwifiap b/
 index 4d86710..5cd8731 100755
 --- a/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/startwifiap
 +++ b/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/startwifiap
-@@ -23,8 +23,9 @@
+@@ -23,8 +23,9 @@ if [ "$REQUEST_METHOD" = "POST" ]; then
              echo -n "Parsing: $POST_DATA\n" > ${LOG_CMD_FILE}
              date > ${LOG_CMD_FILE}
              echo -en "<br>\r\n"
@@ -145,7 +162,7 @@ index 4d86710..5cd8731 100755
              WIFIAPKEYTYPE=$(get_var "keyType" ${POST_DATA})
              WIFIAPKEY=$(get_var "keyValue" ${POST_DATA})
              WIFIAPMAXCLIENTS=$(get_var "maxclients" ${POST_DATA})
-@@ -46,6 +47,15 @@
+@@ -46,6 +47,15 @@ else
      echo -en "<font color=\"black\" >$(date "+%T"):</font> ERROR SSID not found<br>\r\n" >> ${LOG_MSG_FILE}
  fi
  
@@ -161,7 +178,7 @@ index 4d86710..5cd8731 100755
  
  if [ -n "${WIFIAPMAXCLIENTS}" ]; then
      echo -en "<font color=\"black\" >$(date "+%T"):</font> Setting MaxClients to ${WIFIAPMAXCLIENTS}  <br>\r\n" >> ${LOG_MSG_FILE}
-@@ -100,15 +110,15 @@
+@@ -100,15 +110,15 @@ else
      echo -en "<font color=\"black\" >$(date "+%T"):</font> ERROR channel not found<br>\r\n" >> ${LOG_MSG_FILE}
  fi
  
@@ -181,7 +198,7 @@ index 4d86710..5cd8731 100755
  
  ### Start the relay interface: rmnet0/ppp0 | eth0
  ### WARNING: For rmnet interface, PINless code SIM must be used
-@@ -152,7 +162,7 @@
+@@ -152,7 +162,7 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
  echo -ne "<font color=\"black\" >$(date "+%T"):</font> Configuring the NAT...<br>\r\n" >> ${LOG_MSG_FILE}
  modprobe ipt_MASQUERADE
  
@@ -190,7 +207,7 @@ index 4d86710..5cd8731 100755
  
  iptables -I POSTROUTING -t nat -o ${ITF_WAN} -j MASQUERADE
  [ $? -ne 0 ] && \
-@@ -162,9 +172,9 @@
+@@ -162,9 +172,9 @@ iptables -I FORWARD --match state --state RELATED,ESTABLISHED --jump ACCEPT
  [ $? -ne 0 ] && \
      echo -ne "<font color=\"red\" >$(date "+%T"): FAILED ! iptables -I FORWARD --match state --state RELATED,ESTABLISHED --jump ACCEPT</font><br>\r\n" >> ${LOG_MSG_FILE}
  
@@ -202,7 +219,7 @@ index 4d86710..5cd8731 100755
  
  iptables -I INPUT -s ${SUBNET} --jump ACCEPT
  [ $? -ne 0 ] && \
-@@ -185,7 +195,7 @@
+@@ -185,7 +195,7 @@ echo -ne "<font color=\"black\" >$(date "+%T"):</font> Reconfiguring the DHCP se
  test -L /etc/dnsmasq.d/${DHCP_CFG_FILE} || ln -s /tmp/${DHCP_CFG_FILE} /etc/dnsmasq.d/${DHCP_CFG_FILE}
  
  echo -ne "<font color=\"black\" >$(date "+%T"):</font> Generating the configuration file for the DHCP server...<br>\r\n" >> ${LOG_MSG_FILE}
@@ -225,24 +242,24 @@ index bdf8215..1ea68e2 100644
  ifconfig | grep -q rmnet_data
  if [ $? -eq 0 ]; then
 diff --git a/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html b/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html
-index ed59523..b0557af 100644
+index ed59523..5526f4d 100644
 --- a/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html
 +++ b/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html
-@@ -38,6 +38,14 @@
-             <td witdh="50%">
+@@ -39,6 +39,14 @@
                  <h2>General configuration</h2>
  
-+		<p>
+                 <p>
 +                WiFi LAN Interface:
-+		    <select name="interface" id="interface">                     
++                    <select name="interface" id="interface">
 +                    <option value="wlan0">TI</option>
 +                    <option selected="selected" value="wlan1">MediaTek</option>
 +                    </select>
 +                </p>
 +
-                 <p>
++                <p>
                  SSID: <input type="text" name="SSID" value="wifiWebApSSID" required>
                  </p>
+ 
 @@ -174,4 +182,4 @@
  </script>
  
@@ -254,7 +271,7 @@ diff --git a/apps/tools/wifi/wifi/wifi_ap.c b/apps/tools/wifi/wifi/wifi_ap.c
 index 7d2b46b..c176643 100644
 --- a/apps/tools/wifi/wifi/wifi_ap.c
 +++ b/apps/tools/wifi/wifi/wifi_ap.c
-@@ -27,10 +27,10 @@
+@@ -27,10 +27,10 @@ void PrintApHelp(void)
      printf("WiFi command line access point usage\n"
          "==========\n\n"
          "To start the WiFi access point:\n"
@@ -267,7 +284,7 @@ index 7d2b46b..c176643 100644
  
          "To set the SSID of the WiFi access point:\n"
          "\twifi ap setssid [SSID]\n"
-@@ -50,6 +50,9 @@
+@@ -50,6 +50,9 @@ void PrintApHelp(void)
          "To set WPA2 PSK directly:\n"
          "\twifi ap setpsk [PSK]\n"
  
@@ -277,7 +294,7 @@ index 7d2b46b..c176643 100644
          "To set the discoverablity for the WiFi access point:\n"
          "\twifi ap setdiscoverable\n"
  
-@@ -58,7 +61,7 @@
+@@ -58,7 +61,7 @@ void PrintApHelp(void)
  
          "To define the address of the AP and the IP addresses range as well:\n"
          "WARNING: Only IPv4 addresses are supported.\n"
@@ -286,7 +303,7 @@ index 7d2b46b..c176643 100644
  
          "\n");
  }
-@@ -85,7 +88,26 @@
+@@ -85,7 +88,26 @@ void ExecuteWifiApCommand
      }
      else if (strcmp(commandPtr, "start") == 0)
      {
@@ -314,7 +331,7 @@ index 7d2b46b..c176643 100644
          {
              printf("starting...\n");
              exit(EXIT_SUCCESS);
-@@ -98,7 +120,26 @@
+@@ -98,7 +120,26 @@ void ExecuteWifiApCommand
      }
      else if (strcmp(commandPtr, "stop") == 0)
      {
@@ -342,13 +359,10 @@ index 7d2b46b..c176643 100644
          {
              printf("Stopped.\n");
              exit(EXIT_SUCCESS);
-@@ -106,6 +147,40 @@
-         else
-         {
-             printf("ERROR:le_wifiAp_Stop returns %d.\n", result);
-+            exit(EXIT_FAILURE);
-+        }
-+    }
+@@ -109,6 +150,40 @@ void ExecuteWifiApCommand
+             exit(EXIT_FAILURE);
+         }
+     }
 +    else if (strcmp(commandPtr, "setdriver") == 0)
 +    {
 +        // wifi ap driver
@@ -380,10 +394,13 @@ index 7d2b46b..c176643 100644
 +        else
 +        {
 +            printf("ERROR: le_wifiAp_SetWpaSupplicantDriver returns %d.\n", result);
-             exit(EXIT_FAILURE);
-         }
-     }
-@@ -168,7 +243,7 @@
++            exit(EXIT_FAILURE);
++        }
++    }
+     else if (strcmp(commandPtr, "setssid") == 0)
+     {
+         // wifi ap setssid "SSID"
+@@ -168,7 +243,7 @@ void ExecuteWifiApCommand
              exit(EXIT_FAILURE);
          }
  
@@ -392,7 +409,7 @@ index 7d2b46b..c176643 100644
          {
              printf("Security protocol set to %d.\n", securityProtocol);
              exit(EXIT_SUCCESS);
-@@ -337,10 +412,11 @@
+@@ -337,10 +412,11 @@ void ExecuteWifiApCommand
      else if (strcmp(commandPtr, "setiprange") == 0)
      {
          // Only IPv4 addresses are supported.
@@ -405,14 +422,13 @@ index 7d2b46b..c176643 100644
  
          if ((NULL == ipAp) || (NULL == ipStart) || (NULL == ipStop) ||
              ('\0' == ipAp[0]) || ('\0' == ipStart[0]) || ('\0' == ipStop[0]))
-@@ -349,9 +425,25 @@
+@@ -349,9 +425,25 @@ void ExecuteWifiApCommand
              exit(EXIT_FAILURE);
          }
  
 -        if (LE_OK == (result = le_wifiAp_SetIpRange(ipAp, ipStart, ipStop)))
 +	if (NULL == interface)
-         {
--            printf("IP AP@=%s, Start@=%s, Stop@=%s\n", ipAp, ipStart, ipStop);
++        {
 +            printf("wifi ap start. Missing or bad argument.\n");
 +            exit(EXIT_FAILURE);
 +        }
@@ -428,16 +444,17 @@ index 7d2b46b..c176643 100644
 +        }
 +
 +        if (LE_OK == (result = le_wifiAp_SetIpRange(ipAp, ipStart, ipStop, interface)))
-+        {
+         {
+-            printf("IP AP@=%s, Start@=%s, Stop@=%s\n", ipAp, ipStart, ipStop);
 +            printf("IP AP@=%s, Start@=%s, Stop@=%s, Interface@=%s\n", ipAp, ipStart, ipStop, interface);
              exit(EXIT_SUCCESS);
          }
          else
 diff --git a/apps/tools/wifi/wifi/wifi_client.c b/apps/tools/wifi/wifi/wifi_client.c
-index 847c030..8776b80 100644
+index 2f8260f..7566ff6 100644
 --- a/apps/tools/wifi/wifi/wifi_client.c
 +++ b/apps/tools/wifi/wifi/wifi_client.c
-@@ -198,6 +198,12 @@
+@@ -203,6 +203,12 @@ void PrintClientHelp(void)
             "To set security protocol\n"
             "\twifi client setsecurityproto [REF] [SecuProto]\n"
  
@@ -450,7 +467,7 @@ index 847c030..8776b80 100644
             "Values for SecuProto;\n"
             "\t0: No security\n"
             "\t1: Using WEP\n"
-@@ -251,7 +257,6 @@
+@@ -256,7 +262,6 @@ void ExecuteWifiClientCommand
      }
      else if (strcmp(commandPtr, "start") == 0)
      {
@@ -458,20 +475,20 @@ index 847c030..8776b80 100644
          if (LE_OK == le_wifiClient_Start())
          {
              printf("successfully called start.\n");
-@@ -282,10 +287,9 @@
+@@ -287,10 +292,9 @@ void ExecuteWifiClientCommand
          printf("starting scan.\n");
  
          // Add a handler function to handle message reception
 -        ScanHdlrRef=le_wifiClient_AddNewEventHandler(WifiClientScanEventHandler, NULL);
+-
 +        ScanHdlrRef = le_wifiClient_AddNewEventHandler(WifiClientScanEventHandler, NULL);
  
--
 -        if (LE_OK != (result= le_wifiClient_Scan()))
 +        if (LE_OK != le_wifiClient_Scan())
          {
              printf("ERROR: le_wifiClient_Scan returns %d.\n", result);
              exit(EXIT_FAILURE);
-@@ -294,7 +298,7 @@
+@@ -299,7 +303,7 @@ void ExecuteWifiClientCommand
      else if (strcmp(commandPtr, "create") == 0)
      {
          // wifi client create "SSID"
@@ -480,7 +497,7 @@ index 847c030..8776b80 100644
          uint32_t                        length;
          le_wifiClient_AccessPointRef_t  createdAccessPoint;
  
-@@ -303,6 +307,7 @@
+@@ -308,6 +312,7 @@ void ExecuteWifiClientCommand
              printf("ERROR: Missing argument.\n");
              exit(EXIT_FAILURE);
          }
@@ -488,7 +505,7 @@ index 847c030..8776b80 100644
          length = strlen(ssidPtr);
          if ((length > LE_WIFIDEFS_MAX_SSID_LENGTH) || (length < 1))
          {
-@@ -319,7 +324,6 @@
+@@ -324,7 +329,6 @@ void ExecuteWifiClientCommand
          }
  
          createdAccessPoint = le_wifiClient_Create((const uint8_t *)ssidPtr, strlen(ssidPtr));
@@ -496,7 +513,7 @@ index 847c030..8776b80 100644
          if (NULL != createdAccessPoint)
          {
              printf("Created %s has reference %p.\n", ssidPtr, createdAccessPoint);
-@@ -356,6 +360,32 @@
+@@ -361,6 +365,32 @@ void ExecuteWifiClientCommand
              exit(EXIT_FAILURE);
          }
      }
@@ -529,7 +546,7 @@ index 847c030..8776b80 100644
      else if (strcmp(commandPtr, "connect") == 0)
      {
          // wifi client connect [REF]
-@@ -385,8 +415,19 @@
+@@ -390,8 +420,19 @@ void ExecuteWifiClientCommand
      }
      else if (strcmp(commandPtr, "disconnect") == 0)
      {
@@ -550,7 +567,7 @@ index 847c030..8776b80 100644
          {
              printf("WiFi client disconnected.\n");
              exit(EXIT_SUCCESS);
-@@ -397,6 +438,43 @@
+@@ -402,6 +443,43 @@ void ExecuteWifiClientCommand
              exit(EXIT_FAILURE);
          }
      }
@@ -598,7 +615,7 @@ diff --git a/service/daemon/le_wifiAp.c b/service/daemon/le_wifiAp.c
 index 0990c5d..709596b 100644
 --- a/service/daemon/le_wifiAp.c
 +++ b/service/daemon/le_wifiAp.c
-@@ -120,6 +120,8 @@
+@@ -120,6 +120,8 @@ void le_wifiAp_RemoveNewEventHandler
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -607,7 +624,7 @@ index 0990c5d..709596b 100644
   * This function starts the WiFi Access Point.
   * Note that all settings, if to be used, such as security, username, password must set prior to
   * starting the Access Point.
-@@ -131,10 +133,47 @@
+@@ -131,14 +133,36 @@ void le_wifiAp_RemoveNewEventHandler
  //--------------------------------------------------------------------------------------------------
  le_result_t le_wifiAp_Start
  (
@@ -616,10 +633,10 @@ index 0990c5d..709596b 100644
  {
 -    return pa_wifiAp_Start();
 +    return LE_UNSUPPORTED;
-+}
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * This function starts the WiFi Access Point.
 + * Note that all settings, if to be used, such as security, username, password must set prior to
 + * starting the Access Point.
@@ -643,41 +660,41 @@ index 0990c5d..709596b 100644
 +/**
 + * @deprecated - callers should use le_wifiAp_StopInterface instead
 + *
+  * This function stops the WiFi Access Point.
+  *
+  * @return LE_FAULT         The function failed.
+@@ -147,12 +171,28 @@ le_result_t le_wifiAp_Start
+ //--------------------------------------------------------------------------------------------------
+ le_result_t le_wifiAp_Stop
+ (
+-    void
+ )
+ {
+-    return pa_wifiAp_Stop();
++    return LE_UNSUPPORTED;
+ }
+ 
++//--------------------------------------------------------------------------------------------------
++/**
 + * This function stops the WiFi Access Point.
 + *
 + * @return LE_FAULT         The function failed.
 + * @return LE_OK            The function succeeded.
 + */
 +//--------------------------------------------------------------------------------------------------
-+le_result_t le_wifiAp_Stop
-+(
-+)
-+{
-+    return LE_UNSUPPORTED;
- }
- 
- //--------------------------------------------------------------------------------------------------
-@@ -145,14 +184,15 @@
-  * @return LE_OK            The function succeeded.
-  */
- //--------------------------------------------------------------------------------------------------
--le_result_t le_wifiAp_Stop
 +le_result_t le_wifiAp_StopInterface
- (
--    void
++(
 +    const char *interface
 +        ///< [IN]
 +        ///< The WiFi interface to set.
- )
- {
--    return pa_wifiAp_Stop();
++)
++{
 +    return pa_wifiAp_Stop(interface);
- }
--
++}
  
  
  //--------------------------------------------------------------------------------------------------
-@@ -182,9 +222,25 @@
+@@ -182,9 +222,25 @@ le_result_t le_wifiAp_SetSsid
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -705,7 +722,7 @@ index 0990c5d..709596b 100644
   *
   * @return LE_BAD_PARAMETER Some parameter is invalid.
   * @return LE_OK            Function succeeded.
-@@ -355,11 +411,14 @@
+@@ -355,11 +411,14 @@ le_result_t le_wifiAp_SetIpRange
      const char *ip_start,
          ///< [IN]
          ///< the start IP address of the Access Point.
@@ -723,23 +740,23 @@ index 0990c5d..709596b 100644
  }
  
 diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
-index d8dca74..39b9e44 100644
+index ea1a6ca..cfb80a5 100644
 --- a/service/daemon/le_wifiClient.c
 +++ b/service/daemon/le_wifiClient.c
-@@ -194,9 +194,10 @@
+@@ -232,9 +232,10 @@ static le_wifiClient_AccessPointRef_t AddAccessPointToApRefMap
  
          if (NULL != oldAccessPointPtr)
          {
 -            LE_DEBUG("Already exists %p. Update  SignalStrength %d",
 -                returnedRef, apPtr->signalStrength);
 +            LE_DEBUG("Already exists %p. Update  SignalStrength %d, BSSID '%s'",
-+                returnedRef, apPtr->signalStrength, apPtr->bssidBytes);
++                returnedRef, apPtr->signalStrength, apPtr->bssid);
  
-+	    strncpy(oldAccessPointPtr->accessPoint.bssidBytes, apPtr->bssidBytes, sizeof(apPtr->bssidBytes));
++	    strncpy(oldAccessPointPtr->accessPoint.bssid, apPtr->bssid, sizeof(apPtr->bssid));
              oldAccessPointPtr->accessPoint.signalStrength = apPtr->signalStrength;
              oldAccessPointPtr->foundInLatestScan = true;
          }
-@@ -210,12 +211,13 @@
+@@ -248,12 +249,13 @@ static le_wifiClient_AccessPointRef_t AddAccessPointToApRefMap
          if (foundAccessPointPtr)
          {
              FoundWifiApCount++;
@@ -751,11 +768,11 @@ index d8dca74..39b9e44 100644
                  apPtr->ssidLength,
 -                (char *)apPtr->ssidBytes
 +                (char *)apPtr->ssidBytes,
-+                apPtr->bssidBytes
++                apPtr->bssid
                 );
  
              // struct member value copy
-@@ -362,8 +364,9 @@
+@@ -400,8 +402,9 @@ static void *ScanThread
  )
  {
      pa_wifiClient_AccessPoint_t accessPoint;
@@ -766,7 +783,7 @@ index d8dca74..39b9e44 100644
      if (LE_OK != paResult)
      {
          LE_ERROR("Scan failed (%d)", paResult);
-@@ -565,7 +568,7 @@
+@@ -603,7 +606,7 @@ le_result_t le_wifiClient_Start
      // first client starts the hardware
      if (1 == ClientStartCount)
      {
@@ -775,7 +792,7 @@ index d8dca74..39b9e44 100644
      }
  
      if (LE_OK != pa_result)
-@@ -589,7 +592,7 @@
+@@ -627,7 +630,7 @@ le_result_t le_wifiClient_Start
  //--------------------------------------------------------------------------------------------------
  le_result_t le_wifiClient_Stop
  (
@@ -784,7 +801,7 @@ index d8dca74..39b9e44 100644
  )
  {
      if (ClientStartCount)
-@@ -601,7 +604,7 @@
+@@ -639,7 +642,7 @@ le_result_t le_wifiClient_Stop
          // last client closes the hardware
          if (0 == ClientStartCount)
          {
@@ -793,64 +810,18 @@ index d8dca74..39b9e44 100644
              pa_wifiClient_ClearAllCredentials();
              LE_INFO("Stopping client...");
              pa_wifiClient_Stop();
-@@ -791,6 +794,50 @@
- 
- //--------------------------------------------------------------------------------------------------
- /**
-+ * Get the BSSID of the AccessPoint
-+ *
-+ * @return LE_FAULT         Function failed.
-+ * @return LE_BAD_PARAMETER Some parameter is invalid.
-+ * @return LE_OK            Function succeeded.
-+ */
-+//--------------------------------------------------------------------------------------------------
-+le_result_t le_wifiClient_GetBssid
-+(
-+    le_wifiClient_AccessPointRef_t apRef,
-+        ///< [IN]
-+        ///< WiFi Access Point reference.
-+
-+    char *bssidPtr,
-+        ///< [OUT]
-+        ///< The BSSID
-+
-+    size_t bssidSize
-+        ///< [IN]
-+)
-+{
-+    FoundAccessPoint_t *apPtr = le_ref_Lookup(ScanApRefMap, apRef);
-+
-+    LE_DEBUG("AP ref %p", apRef);
-+    if (NULL == apPtr)
-+    {
-+        LE_ERROR("Invalid access point reference.");
-+        return LE_BAD_PARAMETER;
-+    }
-+
-+    if (NULL == bssidPtr)
-+    {
-+        LE_ERROR("Invalid parameter BSSID = %p", bssidPtr);
-+        return LE_BAD_PARAMETER;
-+    }
-+
-+    memcpy(&bssidPtr[0], &apPtr->accessPoint.bssidBytes[0], bssidSize);
-+
-+    return LE_OK;
-+}
-+
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
-  * Get the Service set identification (SSID) of the AccessPoint
-  * @note that the SSID does not have to be human readable ASCII values, but often has.
-  *
-@@ -837,6 +884,117 @@
+@@ -873,6 +876,7 @@ le_result_t le_wifiClient_GetBssid
      return LE_OK;
  }
  
 +
-+//--------------------------------------------------------------------------------------------------
-+/**
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Get the Service set identification (SSID) of the AccessPoint
+@@ -924,6 +928,117 @@ le_result_t le_wifiClient_GetSsid
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * Set the Wpa Supplicant Driver
 + *
 + * @return LE_FAULT         Function failed.
@@ -959,10 +930,13 @@ index d8dca74..39b9e44 100644
 +
 +    return result;
 +}
- 
- //--------------------------------------------------------------------------------------------------
- /**
-@@ -1193,9 +1351,21 @@
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the passphrase used to generate the PSK.
+  *
+  * @note This is one way to authenticate against the access point. The other one is provided by the
+@@ -1277,9 +1392,21 @@ le_result_t le_wifiClient_Connect
  //--------------------------------------------------------------------------------------------------
  le_result_t le_wifiClient_Disconnect
  (
@@ -985,30 +959,22 @@ index d8dca74..39b9e44 100644
  }
  
 diff --git a/service/platformAdaptor/inc/pa_wifi.h b/service/platformAdaptor/inc/pa_wifi.h
-index ac16541..9efcc7a 100644
+index 97adba4..062d891 100644
 --- a/service/platformAdaptor/inc/pa_wifi.h
 +++ b/service/platformAdaptor/inc/pa_wifi.h
-@@ -19,10 +19,16 @@
- //--------------------------------------------------------------------------------------------------
- typedef struct
- {
--    int16_t  signalStrength;                        ///< 0xffff means value was not found.
--    uint8_t  ssidLength;                            ///< The number of bytes in the ssidBytes.
--    uint8_t  ssidBytes[LE_WIFIDEFS_MAX_SSID_BYTES]; ///< Contains ssidLength number of bytes.
-+    char                       bssidBytes[LE_WIFIDEFS_MAX_BSSID_BYTES]; 	///< Contains the bssid.
-+    uint8_t                    ssidBytes[LE_WIFIDEFS_MAX_SSID_BYTES]; 		///< Contains ssidLength number of bytes.
-+    int16_t                    signalStrength;                        		///< 0xffff means value was not found.
-+    uint8_t                    ssidLength;                            		///< The number of bytes in the ssidBytes.
+@@ -25,6 +25,11 @@ typedef struct
+     char     bssid[LE_WIFIDEFS_MAX_BSSID_BYTES];    ///< Contains the bssid.
  } pa_wifiClient_AccessPoint_t;
-+
+ 
 +typedef struct
 +{
 +    char 		       interface[LE_WIFIDEFS_MAX_INTERFACE_BYTES];	///< The wireless interface.
 +} pa_wifiClient_SetEvent_t;
- 
++
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -195,6 +201,39 @@
+  * Event handler for PA WiFi access point changes.
+@@ -196,6 +201,39 @@ LE_SHARED le_result_t pa_wifiClient_SetUserCredentials
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1048,7 +1014,7 @@ index ac16541..9efcc7a 100644
   * Set the PassPhrase used to create PSK (WPA-Personal).
   * @see  pa_wifiClient_SetPreSharedKey
   *
-@@ -257,6 +296,21 @@
+@@ -258,6 +296,21 @@ LE_SHARED le_result_t pa_wifiClient_SetSecurityProtocol
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1074,7 +1040,7 @@ diff --git a/service/platformAdaptor/inc/pa_wifi_ap.h b/service/platformAdaptor/
 index cadaa53..5a65f42 100644
 --- a/service/platformAdaptor/inc/pa_wifi_ap.h
 +++ b/service/platformAdaptor/inc/pa_wifi_ap.h
-@@ -85,7 +85,9 @@
+@@ -85,7 +85,9 @@ LE_SHARED le_result_t pa_wifiAp_Release
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Start
  (
@@ -1085,7 +1051,7 @@ index cadaa53..5a65f42 100644
  );
  
  //--------------------------------------------------------------------------------------------------
-@@ -99,7 +101,24 @@
+@@ -99,7 +101,24 @@ le_result_t pa_wifiAp_Start
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Stop
  (
@@ -1111,7 +1077,7 @@ index cadaa53..5a65f42 100644
  );
  
  //--------------------------------------------------------------------------------------------------
-@@ -253,8 +272,11 @@
+@@ -253,8 +272,11 @@ le_result_t pa_wifiAp_SetIpRange
      const char *ipStartPtr,
          ///< [IN]
          ///< the start IP address of the Access Point.
@@ -1125,7 +1091,7 @@ index cadaa53..5a65f42 100644
  );
  #endif // PA_WIFI_AP_H
 diff --git a/service/platformAdaptor/ti/pa_wifi.sh b/service/platformAdaptor/ti/pa_wifi.sh
-index d12d58c..2da387a 100644
+index 2ae101a..e6c6bb7 100644
 --- a/service/platformAdaptor/ti/pa_wifi.sh
 +++ b/service/platformAdaptor/ti/pa_wifi.sh
 @@ -12,8 +12,9 @@
@@ -1140,7 +1106,7 @@ index d12d58c..2da387a 100644
  
  if [ "$1" = "-d" ]; then
      shift
-@@ -26,7 +27,10 @@
+@@ -26,7 +27,10 @@ CMD=$2
  SSID=$3
  
  # Configuration file
@@ -1152,7 +1118,7 @@ index d12d58c..2da387a 100644
  
  # PATH
  export PATH=/legato/systems/current/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
-@@ -53,12 +57,6 @@
+@@ -53,12 +57,6 @@ CheckConnection()
  case ${CMD} in
    WIFI_START)
      echo "WIFI_START"
@@ -1165,7 +1131,7 @@ index d12d58c..2da387a 100644
      # Mount the WiFi network interface
      /sbin/ifup ${IFACE} || exit 91
      exit 0 ;;
-@@ -66,10 +64,7 @@
+@@ -66,10 +64,7 @@ case ${CMD} in
    WIFI_STOP)
      echo "WIFI_STOP"
      # Unmount the WiFi network interface
@@ -1177,7 +1143,7 @@ index d12d58c..2da387a 100644
      exit 0 ;;
  
    WIFI_WLAN_UP)
-@@ -97,9 +92,20 @@
+@@ -97,9 +92,20 @@ case ${CMD} in
      (killall hostapd) || exit 100
      exit 0 ;;
  
@@ -1199,13 +1165,21 @@ index d12d58c..2da387a 100644
      exit 0 ;;
  
    WIFICLIENT_DISCONNECT)
-@@ -117,21 +123,17 @@
+@@ -117,21 +123,17 @@ case ${CMD} in
  
    WIFICLIENT_CONNECT_SECURITY_NONE)
      echo "WIFICLIENT_CONNECT_SECURITY_NONE mode"
--    # Run wpa_supplicant daemon
--    /sbin/wpa_supplicant -d -Dnl80211 -c /etc/${WPA_CFG} -i${IFACE} -B || exit 99
 +    [ -f /tmp/${WPA_CFG} ] || exit 1
++
++    mv /tmp/${WPA_CFG} /tmp/${WPA_CFG}.tmp || exit 1
++    if [ -f /etc/${WPA_CFG} ]; then
++        cp /etc/${WPA_CFG} /tmp/${WPA_CFG} || exit 1
++    fi
++    cat /tmp/${WPA_CFG}.tmp >> /tmp/${WPA_CFG} || exit 1
++
+     # Run wpa_supplicant daemon
+-    /sbin/wpa_supplicant -d -Dnl80211 -c /etc/${WPA_CFG} -i${IFACE} -B || exit 99
++    /sbin/wpa_supplicant -d -D${WPA_DRIVER} -c /tmp/${WPA_CFG} -i${IFACE} -B || exit 99
  
 -    /sbin/wpa_cli -i${IFACE} disconnect
 -    for i in `/sbin/wpa_cli -i${IFACE} list_networks | grep ^[0-9] | cut -f1`; do
@@ -1219,19 +1193,10 @@ index d12d58c..2da387a 100644
 -    (/sbin/wpa_cli -i${IFACE} select_network 0 | grep OK) || exit 6
 -    (/sbin/wpa_cli -i${IFACE} enable_network 0 | grep OK) || exit 7
 -    (/sbin/wpa_cli -i${IFACE} reassociate | grep OK) || exit 8
-+    mv /tmp/${WPA_CFG} /tmp/${WPA_CFG}.tmp || exit 1
-+    if [ -f /etc/${WPA_CFG} ]; then
-+        cp /etc/${WPA_CFG} /tmp/${WPA_CFG} || exit 1
-+    fi
-+    cat /tmp/${WPA_CFG}.tmp >> /tmp/${WPA_CFG} || exit 1
-+
-+    # Run wpa_supplicant daemon
-+    /sbin/wpa_supplicant -d -D${WPA_DRIVER} -c /tmp/${WPA_CFG} -i${IFACE} -B || exit 99
-+
      /sbin/wpa_cli -i${IFACE} status
  
      CheckConnection ${IFACE} ;;
-@@ -140,7 +142,7 @@
+@@ -140,7 +142,7 @@ case ${CMD} in
      echo "WIFICLIENT_CONNECT_SECURITY_WEP mode"
      WEPKEY=$4
      # Run wpa_supplicant daemon
@@ -1240,7 +1205,7 @@ index d12d58c..2da387a 100644
  
      /sbin/wpa_cli -i${IFACE} disconnect
      for i in `/sbin/wpa_cli -i${IFACE} list_networks | grep ^[0-9] | cut -f1`; do
-@@ -164,11 +166,13 @@
+@@ -164,11 +166,13 @@ case ${CMD} in
      [ -f /tmp/${WPA_CFG} ] || exit 1
  
      mv /tmp/${WPA_CFG} /tmp/${WPA_CFG}.tmp || exit 1
@@ -1256,7 +1221,7 @@ index d12d58c..2da387a 100644
  
      CheckConnection ${IFACE} ;;
  
-@@ -177,11 +181,13 @@
+@@ -177,11 +181,13 @@ case ${CMD} in
      [ -f /tmp/${WPA_CFG} ] || exit 1
  
      mv /tmp/${WPA_CFG} /tmp/${WPA_CFG}.tmp || exit 1
@@ -1272,7 +1237,7 @@ index d12d58c..2da387a 100644
  
      /sbin/wpa_cli -i${IFACE} status
  
-@@ -192,7 +198,7 @@
+@@ -192,7 +198,7 @@ case ${CMD} in
      PASSWD=$5
      echo "WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE mode"
      # Run wpa_supplicant daemon
@@ -1281,7 +1246,7 @@ index d12d58c..2da387a 100644
  
      /sbin/wpa_cli -i${IFACE} disconnect
      for i in `/sbin/wpa_cli -i${IFACE} list_networks | grep ^[0-9] | cut -f1`; do
-@@ -219,11 +225,11 @@
+@@ -219,11 +225,11 @@ case ${CMD} in
      CheckConnection ${IFACE} ;;
  
    WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE)
@@ -1310,6 +1275,9 @@ index 435b532..b32ac6f 100644
 -#define COMMAND_WIFI_SET_EVENT       "wlan0 WIFI_SET_EVENT"
 -#define COMMAND_WIFIAP_HOSTAPD_START "wlan0 WIFIAP_HOSTAPD_START"
 -#define COMMAND_WIFIAP_HOSTAPD_STOP  "wlan0 WIFIAP_HOSTAPD_STOP"
+-
+-// iptables rule to allow/disallow the DHCP port on wlan0
+-#define COMMAND_IPTABLE_DHCP_WLAN0   "INPUT -i wlan0 -p udp -m udp " \
 +#define COMMAND_WIFI_HW_START        		"%s WIFI_START"
 +#define COMMAND_WIFI_HW_STOP         		"%s WIFI_STOP"
 +#define COMMAND_WIFI_WLAN_UP         		"%s WIFI_WLAN_UP"
@@ -1318,9 +1286,7 @@ index 435b532..b32ac6f 100644
 +#define COMMAND_WIFIAP_HOSTAPD_STOP  		"%s WIFIAP_HOSTAPD_STOP"
 +#define COMMAND_WIFIAP_WPA_SUPPLICANT_START 	"%s WIFIAP_WPA_SUPPLICANT_START"
 +#define COMMAND_WIFIAP_WPA_SUPPLICANT_STOP  	"%s WIFIAP_WPA_SUPPLICANT_STOP"
- 
--// iptables rule to allow/disallow the DHCP port on wlan0
--#define COMMAND_IPTABLE_DHCP_WLAN0   "INPUT -i wlan0 -p udp -m udp " \
++
 +// iptables rule to allow/disallow the DHCP port on wlan interface
 +#define COMMAND_IPTABLE_DHCP_WLAN   "INPUT -i %s -p udp -m udp " \
                                       "--sport 67:68 --dport 67:68 -j ACCEPT"
@@ -1359,7 +1325,7 @@ index 435b532..b32ac6f 100644
  
  // WiFi access point configuration.
  //--------------------------------------------------------------------------------------------------
-@@ -63,37 +66,49 @@
+@@ -63,38 +66,50 @@
   * Host access point global configuration.
   */
  //--------------------------------------------------------------------------------------------------
@@ -1415,12 +1381,13 @@ index 435b532..b32ac6f 100644
      "wpa_key_mgmt=WPA-PSK\n"\
      "wpa_pairwise=CCMP\n"\
      "rsn_pairwise=CCMP\n"
-+
-+#define WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_WPA2 "\tkey_mgmt=WPA-PSK\n"
  
++#define WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_WPA2 "\tkey_mgmt=WPA-PSK\n"
++
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -104,10 +119,23 @@
+  * Maximum numbers of WiFi connections for the TI chip
+@@ -104,12 +119,25 @@
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1435,16 +1402,18 @@ index 435b532..b32ac6f 100644
   */
  //--------------------------------------------------------------------------------------------------
  static le_wifiAp_SecurityProtocol_t SavedSecurityProtocol;
-+//--------------------------------------------------------------------------------------------------
-+/**
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * The current interface.
 + */
 +//--------------------------------------------------------------------------------------------------
 +static char 			    SavedWpaInterface[LE_WIFIDEFS_MAX_INTERFACE_BYTES];
- //--------------------------------------------------------------------------------------------------
- /**
++//--------------------------------------------------------------------------------------------------
++/**
   * The current SSID
-@@ -228,20 +256,25 @@
+  */
+ //--------------------------------------------------------------------------------------------------
+@@ -228,20 +256,25 @@ static void *WifiApPaThreadMain
      void *contextPtr
  )
  {
@@ -1454,13 +1423,13 @@ index 435b532..b32ac6f 100644
 +    char* interface = (char*)contextPtr;
  
      LE_INFO("Started!");
-+
+ 
 +    snprintf(tmpString,
 +             sizeof(tmpString),
 +             (WIFI_SCRIPT_PATH COMMAND_WIFI_SET_EVENT),
 +	     strnlen(interface, LE_WIFIDEFS_MAX_INTERFACE_BYTES),
 +	     interface);
- 
++
      // Open the command "iw events" for reading.
      IwThreadPipePtr = popen(tmpString, "r");
  
@@ -1475,7 +1444,7 @@ index 435b532..b32ac6f 100644
          return NULL;
      }
  
-@@ -442,18 +475,22 @@
+@@ -442,18 +475,22 @@ le_result_t pa_wifiAp_Release
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Start
  (
@@ -1501,7 +1470,7 @@ index 435b532..b32ac6f 100644
      le_thread_SetJoinable(WifiApPaThread);
      le_thread_AddDestructor(ThreadDestructor, NULL);
      le_thread_Start(WifiApPaThread);
-@@ -470,7 +507,12 @@
+@@ -470,7 +507,12 @@ le_result_t pa_wifiAp_Start
  
      if (LE_OK == result)
      {
@@ -1515,7 +1484,7 @@ index 435b532..b32ac6f 100644
          /**
           * Return value of -1 means that the fork() has failed (see man system).
           * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -478,14 +520,14 @@
+@@ -478,14 +520,14 @@ le_result_t pa_wifiAp_Start
           * 127 if modules not loaded or interface not seen,
           * 1 if the option passed if unknown (start stop and restart).
          */
@@ -1533,7 +1502,7 @@ index 435b532..b32ac6f 100644
              result = LE_FAULT;
          }
      }
-@@ -493,15 +535,20 @@
+@@ -493,15 +535,20 @@ le_result_t pa_wifiAp_Start
      if (LE_OK == result)
      {
          // COMMAND_WIFI_WLAN_UP
@@ -1557,7 +1526,7 @@ index 435b532..b32ac6f 100644
              result = LE_FAULT;
          }
      }
-@@ -509,50 +556,66 @@
+@@ -509,50 +556,66 @@ le_result_t pa_wifiAp_Start
      if (LE_OK == result)
      {
          // Create /etc/hostapd.conf
@@ -1640,7 +1609,7 @@ index 435b532..b32ac6f 100644
                          result = WriteApCfgFile(tmpString, configFilePtr);
                      }
                      else
-@@ -571,20 +634,28 @@
+@@ -571,20 +634,28 @@ le_result_t pa_wifiAp_Start
  
      if (LE_OK == result)
      {
@@ -1683,7 +1652,7 @@ index 435b532..b32ac6f 100644
      }
  
      // Close file
-@@ -595,28 +666,42 @@
+@@ -595,28 +666,42 @@ le_result_t pa_wifiAp_Start
      {
          LE_INFO("Waiting 15s for WiFi driver availability ...");
          sleep(15);   // Sleep 15s
@@ -1742,7 +1711,7 @@ index 435b532..b32ac6f 100644
      }
  
      return result;
-@@ -633,34 +718,61 @@
+@@ -633,34 +718,61 @@ le_result_t pa_wifiAp_Start
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Stop
  (
@@ -1811,7 +1780,7 @@ index 435b532..b32ac6f 100644
      /**
       * Return value of -1 means that the fork() has failed (see man system).
       * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -671,12 +783,12 @@
+@@ -671,12 +783,12 @@ le_result_t pa_wifiAp_Stop
      */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -1826,16 +1795,10 @@ index 435b532..b32ac6f 100644
          result = LE_FAULT;
      }
  
-@@ -772,6 +884,39 @@
-     else
-     {
-         LE_ERROR("ERROR: SSID length exceeds %d bytes\n", LE_WIFIDEFS_MAX_SSID_LENGTH);
-+    }
-+    return result;
-+}
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
+@@ -778,6 +890,39 @@ le_result_t pa_wifiAp_SetSsid
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * Set the WPA Supplicant driver used to communicate.
 + *
 + * @return LE_BAD_PARAMETER Some parameter is invalid.
@@ -1863,10 +1826,16 @@ index 435b532..b32ac6f 100644
 +        default:
 +            result = LE_BAD_PARAMETER;
 +            break;
-     }
-     return result;
- }
-@@ -999,9 +1144,12 @@
++    }
++    return result;
++}
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the security protocol used to communicate.
+  *
+  * @note WEP is not supported as it is unsecure and has been deprecated in favor of WPA/WPA2.
+@@ -999,9 +1144,12 @@ le_result_t pa_wifiAp_SetIpRange
      const char *ipStartPtr,
          ///< [IN]
          ///< the start IP address of the Access Point.
@@ -1880,7 +1849,7 @@ index 435b532..b32ac6f 100644
  )
  {
      struct sockaddr_in  saApPtr;
-@@ -1065,7 +1213,8 @@
+@@ -1065,7 +1213,8 @@ le_result_t pa_wifiAp_SetIpRange
          char cmd[256];
          int  systemResult;
  
@@ -1890,7 +1859,7 @@ index 435b532..b32ac6f 100644
  
          systemResult = system(cmd);
          if (0 != WEXITSTATUS (systemResult))
-@@ -1087,9 +1236,12 @@
+@@ -1087,9 +1236,12 @@ le_result_t pa_wifiAp_SetIpRange
              filePtr = fopen (DNSMASQ_CFG_FILE, "w");
              if (filePtr != NULL)
              {
@@ -1906,7 +1875,7 @@ index 435b532..b32ac6f 100644
                  fclose(filePtr);
              }
              else
-@@ -1100,8 +1252,11 @@
+@@ -1100,8 +1252,11 @@ le_result_t pa_wifiAp_SetIpRange
  
              LE_INFO("@AP=%s, @APstart=%s, @APstop=%s", ipApPtr, ipStartPtr, ipStopPtr);
  
@@ -1921,10 +1890,10 @@ index 435b532..b32ac6f 100644
              {
                  LE_ERROR("Unable to allow DHCP ports.");
 diff --git a/service/platformAdaptor/ti/pa_wifi_client_ti.c b/service/platformAdaptor/ti/pa_wifi_client_ti.c
-index bc19b3e..b799119 100644
+index 3a5761b..3770afc 100644
 --- a/service/platformAdaptor/ti/pa_wifi_client_ti.c
 +++ b/service/platformAdaptor/ti/pa_wifi_client_ti.c
-@@ -24,41 +24,62 @@
+@@ -24,42 +24,63 @@
  #define WIFI_SCRIPT_PATH "/legato/systems/current/apps/wifiService/read-only/pa_wifi.sh "
  
  // Set of commands to drive the WiFi features.
@@ -1951,21 +1920,21 @@ index bc19b3e..b799119 100644
 -    "wlan0 WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE \"%.*s\" \"%s\" \"%s\""
 -#define COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE \
 -    "wlan0 WIFICLIENT_CONNECT_WPA_PASSPHRASE \"%.*s\" %s"
-+#define COMMAND_WIFI_HW_START 						"%s WIFI_START"
-+#define COMMAND_WIFI_HW_STOP 						"%s WIFI_STOP" /* not sure that this works */
-+#define COMMAND_WIFI_WLAN_UP 						"%s WIFI_WLAN_UP"
-+#define COMMAND_WIFI_SET_EVENT 						"%s WIFI_SET_EVENT"
-+#define COMMAND_WIFICLIENT_START_SCAN 					"%s WIFICLIENT_START_SCAN"
-+#define COMMAND_WIFICLIENT_DISCONNECT 					"%s WIFICLIENT_DISCONNECT"
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_NONE 			"%s WIFICLIENT_CONNECT_SECURITY_NONE \"%.*s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP 			"%s WIFICLIENT_CONNECT_SECURITY_WEP \"%.*s\" \"%s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PASS_PERSONAL 		"%s WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL \"%.*s\" \"%.*s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PASS_PERSONAL 		"%s WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL \"%.*s\" \"%.*s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL 		"%s WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL \"%.*s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL 		"%s WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL \"%.*s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE 	"%s WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE \"%.*s\" \"%s\" \"%s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE 	"%s WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE \"%.*s\" \"%s\" \"%s\" \"%s\""
-+#define COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE 			"%s WIFICLIENT_CONNECT_WPA_PASSPHRASE \"%.*s\" %s"
++#define COMMAND_WIFI_HW_START                                         "%s WIFI_START"
++#define COMMAND_WIFI_HW_STOP                                          "%s WIFI_STOP" /* not sure that this works */
++#define COMMAND_WIFI_WLAN_UP                                          "%s WIFI_WLAN_UP"
++#define COMMAND_WIFI_SET_EVENT                                        "%s WIFI_SET_EVENT"
++#define COMMAND_WIFICLIENT_START_SCAN                                 "%s WIFICLIENT_START_SCAN"
++#define COMMAND_WIFICLIENT_DISCONNECT                                 "%s WIFICLIENT_DISCONNECT"
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_NONE                      "%s WIFICLIENT_CONNECT_SECURITY_NONE \"%.*s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP                       "%s WIFICLIENT_CONNECT_SECURITY_WEP \"%.*s\" \"%s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PASS_PERSONAL         "%s WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL \"%.*s\" \"%.*s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PASS_PERSONAL        "%s WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL \"%.*s\" \"%.*s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL          "%s WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL \"%.*s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL         "%s WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL \"%.*s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE  "%s WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE \"%.*s\" \"%s\" \"%s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE "%s WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE \"%.*s\" \"%s\" \"%s\" \"%s\""
++#define COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE                     "%s WIFICLIENT_CONNECT_WPA_PASSPHRASE \"%.*s\" %s"
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1984,7 +1953,7 @@ index bc19b3e..b799119 100644
 +    ssid=\"%.*s\"\n 						\
 +    psk=%s\n 							\
      }\n"
-+
+ 
 +#define WPA_SUPPLICANT_DATA_NO_SECURITY \
 +    "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=root\n\n 	\
 +    network={\n 						\
@@ -2012,10 +1981,11 @@ index bc19b3e..b799119 100644
 + */
 +//--------------------------------------------------------------------------------------------------
 +static char SavedInterface[LE_WIFIDEFS_MAX_INTERFACE_LENGTH];
- 
++
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -103,25 +124,27 @@
+  * The current security protocol.
+@@ -103,25 +124,27 @@ static char SavedUsername[LE_WIFIDEFS_MAX_USERNAME_BYTES];
  //--------------------------------------------------------------------------------------------------
  static char SavedPassword[LE_WIFIDEFS_MAX_PASSWORD_BYTES];
  
@@ -2044,7 +2014,7 @@ index bc19b3e..b799119 100644
  //--------------------------------------------------------------------------------------------------
  /**
   * Flag set when a WiFi scan is in progress.
-@@ -129,13 +152,13 @@
+@@ -129,13 +152,13 @@ static FILE *IwThreadPipePtr  = NULL;
  //--------------------------------------------------------------------------------------------------
  static bool  IsScanRunning    = false;
  
@@ -2059,7 +2029,7 @@ index bc19b3e..b799119 100644
  //--------------------------------------------------------------------------------------------------
  /**
   * The handle of the WiFi platform adaptor thread.
-@@ -205,12 +228,17 @@
+@@ -205,12 +228,17 @@ static void *WifiClientPaThreadMain
      void *contextPtr
  )
  {
@@ -2078,7 +2048,7 @@ index bc19b3e..b799119 100644
      IwThreadPipePtr = popen(tmpString, "r");
  
      if (NULL == IwThreadPipePtr)
-@@ -225,10 +253,11 @@
+@@ -225,10 +253,11 @@ static void *WifiClientPaThreadMain
      // Read the output one line at a time - output it.
      while (NULL != fgets(path, sizeof(path) - 1, IwThreadPipePtr))
      {
@@ -2092,7 +2062,7 @@ index bc19b3e..b799119 100644
              // Report event: LE_WIFICLIENT_EVENT_CONNECTED
              le_wifiClient_Event_t event = LE_WIFICLIENT_EVENT_CONNECTED;
              LE_INFO("InternalWifiClientStateEvent event: %d ", event);
-@@ -300,18 +329,26 @@
+@@ -300,18 +329,26 @@ le_result_t pa_wifiClient_Start
      void
  )
  {
@@ -2102,7 +2072,7 @@ index bc19b3e..b799119 100644
  
      LE_INFO("WiFi client starts");
  
-+    
++
 +
      // Create WiFi Client PA Thread
 -    WifiClientPaThread = le_thread_Create("WifiClientPaThread", WifiClientPaThreadMain, NULL);
@@ -2121,7 +2091,7 @@ index bc19b3e..b799119 100644
      /**
       * Return value of -1 means that the fork() has failed (see man system).
       * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -321,25 +358,30 @@
+@@ -321,25 +358,30 @@ le_result_t pa_wifiClient_Start
       */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -2138,7 +2108,7 @@ index bc19b3e..b799119 100644
      if (LE_OK == result)
      {
 -        systemResult = system(WIFI_SCRIPT_PATH COMMAND_WIFI_WLAN_UP);
-+	snprintf(tmpString,
++        snprintf(tmpString,
 +                 sizeof(tmpString),
 +                 (WIFI_SCRIPT_PATH COMMAND_WIFI_WLAN_UP),
 +                 SavedInterface);
@@ -2157,7 +2127,7 @@ index bc19b3e..b799119 100644
              result = LE_FAULT;
          }
      }
-@@ -359,8 +401,16 @@
+@@ -359,8 +401,16 @@ le_result_t pa_wifiClient_Stop
      void
  )
  {
@@ -2175,7 +2145,7 @@ index bc19b3e..b799119 100644
  
      /**
       * Return value of -1 means that the fork() has failed (see man system).
-@@ -371,12 +421,12 @@
+@@ -371,12 +421,12 @@ le_result_t pa_wifiClient_Stop
      */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -2190,7 +2160,7 @@ index bc19b3e..b799119 100644
          result = LE_FAULT;
      }
  
-@@ -414,6 +464,7 @@
+@@ -414,6 +464,7 @@ le_result_t pa_wifiClient_Scan
      void
  )
  {
@@ -2198,21 +2168,20 @@ index bc19b3e..b799119 100644
      le_result_t result = LE_OK;
  
      LE_INFO("Scanning");
-@@ -428,14 +479,20 @@
+@@ -428,14 +479,20 @@ le_result_t pa_wifiClient_Scan
          return LE_BUSY;
      }
  
--    IsScanRunning = true;
--    /* Open the command for reading. */
--    IwScanPipePtr = popen(WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_START_SCAN, "r");
 +    snprintf(tmpString,
 +             sizeof(tmpString),
 +             (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_START_SCAN),
 +             SavedInterface);
- 
-+    IsScanRunning = true;
-+    LE_INFO("run command('%s')", tmpString);
 +
+     IsScanRunning = true;
+-    /* Open the command for reading. */
+-    IwScanPipePtr = popen(WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_START_SCAN, "r");
++    LE_INFO("run command('%s')", tmpString);
+ 
 +    /* Open the command for reading. */
 +    IwScanPipePtr = popen(tmpString, "r");
      if (NULL == IwScanPipePtr)
@@ -2224,7 +2193,7 @@ index bc19b3e..b799119 100644
              errno,
              strerror(errno));
          result = LE_FAULT;
-@@ -474,12 +531,13 @@
+@@ -474,12 +531,13 @@ bool pa_wifiClient_IsScanRunning
  le_result_t pa_wifiClient_GetScanResult
  (
      pa_wifiClient_AccessPoint_t *accessPointPtr
@@ -2241,47 +2210,36 @@ index bc19b3e..b799119 100644
  
      LE_INFO("Scan results");
  
-@@ -497,31 +555,39 @@
-     /* Default values */
-     accessPointPtr->signalStrength = 0xffff;
-     accessPointPtr->ssidLength = 0;
-+    memset(&accessPointPtr->ssidBytes, 0, LE_WIFIDEFS_MAX_SSID_BYTES);
-+    memset(&accessPointPtr->bssidBytes, 0, LE_WIFIDEFS_MAX_BSSID_BYTES);
- 
-     /* Read the output a line at a time - output it. */
-     while (NULL != fgets(path, sizeof(path) - 1, IwScanPipePtr))
-     {
+@@ -509,24 +567,23 @@ le_result_t pa_wifiClient_GetScanResult
+         const size_t signalPrefixLen = strlen(signalPrefix);
+         const char *bssidPrefix = "BSS ";
+         const size_t bssidPrefixLen = strlen(bssidPrefix);
 -        LE_INFO("PARSING:%s: len:%zd", path, strnlen(path, sizeof(path) - 1));
 +        LE_INFO("PARSING: '%s'", path);
  
-         if (0 == strncmp("\tSSID: ", path, 7))
+         if (0 == strncmp(ssidPrefix, path, ssidPrefixLen))
          {
-             accessPointPtr->ssidLength = strnlen(path, LE_WIFIDEFS_MAX_SSID_BYTES) - 7 - 1;
--            LE_INFO("FOUND SSID:%s  %c%c.. ", path, path[7], path[8]);
--            memset(&accessPointPtr->ssidBytes, 0, LE_WIFIDEFS_MAX_SSID_BYTES);
--            memcpy (&accessPointPtr->ssidBytes, &path[7], accessPointPtr->ssidLength);
--            LE_INFO("FOUND SSID: Parsed:\"%s\"", &accessPointPtr->ssidBytes[0]);
--            return LE_OK;
-+            LE_INFO("FOUND SSID: '%s'", &path[7]);            
-+            memcpy(&accessPointPtr->ssidBytes, &path[7], accessPointPtr->ssidLength);
-+            LE_INFO("SSID: '%s'", &accessPointPtr->ssidBytes[0]);
-+            ret = LE_OK;
-+	    break;
+             // +1 and -1 are to allow for a newline which should be excluded from the SSID
+             accessPointPtr->ssidLength =
+                 strnlen(&path[ssidPrefixLen], LE_WIFIDEFS_MAX_SSID_LENGTH + 1) - 1;
+-            LE_INFO("FOUND SSID:%s  %c%c.. ", path, path[ssidPrefixLen], path[ssidPrefixLen + 1]);
++            LE_INFO("FOUND SSID: '%s'", &path[ssidPrefixLen]);
+             memcpy(&accessPointPtr->ssidBytes, &path[ssidPrefixLen], accessPointPtr->ssidLength);
+             LE_INFO("SSID: '%s'", accessPointPtr->ssidBytes);
+             return LE_OK;
          }
-         else if (0 == strncmp("\tsignal: ", path, 9))
+         else if (0 == strncmp(signalPrefix, path, signalPrefixLen))
          {
--            LE_INFO("FOUND SIGNAL STRENGTH:%s  %c %c ", path, path[10], path[11]);
-+            LE_INFO("FOUND SIGNAL STRENGTH: '%s'", &path[9]);
-             accessPointPtr->signalStrength = atoi(&path[9]);
--            LE_INFO("FOUND SIGNAL STRENGTH: signalStrength:%d ",
-+            LE_INFO("signal(%d)",
-             accessPointPtr->signalStrength);
-+        }
-+        else if (0 == strncmp("BSS ", path, 4))
-+        {
-+            LE_INFO("FOUND BSSID: '%s'", &path[4]);	    
-+	    memcpy(&accessPointPtr->bssidBytes, &path[4], LE_WIFIDEFS_MAX_BSSID_LENGTH);
-+	    LE_INFO("BSSID: '%s'", &accessPointPtr->bssidBytes[0]);
+-            LE_INFO("FOUND SIGNAL STRENGTH:%s  %c %c ", path, path[signalPrefixLen + 1],
+-                    path[signalPrefixLen + 2]);
++            LE_INFO("FOUND SIGNAL STRENGTH: '%s'", &path[signalPrefixLen]);
+             accessPointPtr->signalStrength = atoi(&path[signalPrefixLen]);
+-            LE_INFO("FOUND SIGNAL STRENGTH: signalStrength:%d ", accessPointPtr->signalStrength);
++            LE_INFO("signal(%d)", accessPointPtr->signalStrength);
+         }
+         else if (0 == strncmp(bssidPrefix, path, bssidPrefixLen))
+         {
+@@ -536,7 +593,7 @@ le_result_t pa_wifiClient_GetScanResult
          }
      }
  
@@ -2290,14 +2248,10 @@ index bc19b3e..b799119 100644
  }
  
  //--------------------------------------------------------------------------------------------------
-@@ -544,6 +610,39 @@
-         IsScanRunning = false;
-     }
-     return LE_OK;
-+}
-+
-+//--------------------------------------------------------------------------------------------------
-+/**
+@@ -563,6 +620,39 @@ le_result_t pa_wifiClient_ScanDone
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 + * Set the WPA Supplicant driver for communication.
 + *
 + * @return LE_BAD_PARAMETER  The function failed due to an invalid parameter.
@@ -2327,10 +2281,14 @@ index bc19b3e..b799119 100644
 +            break;
 +    }
 +    return result;
- }
- 
- //--------------------------------------------------------------------------------------------------
-@@ -594,15 +693,18 @@
++}
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the security protocol for communication.
+  *
+  * @return LE_BAD_PARAMETER  The function failed due to an invalid parameter.
+@@ -609,15 +699,18 @@ le_result_t pa_wifiClient_SetSecurityProtocol
  //--------------------------------------------------------------------------------------------------
  static le_result_t GeneratePsk
  (
@@ -2346,12 +2304,12 @@ index bc19b3e..b799119 100644
          ///< [IN]
          ///< The passphrase
 +    const char *interfacePtr,
-+	///< [IN]
-+	///< The wireless interface
++    ///< [IN]
++    ///< The wireless interface
      char *pskPtr
          ///< [OUT]
          ///< The generated PSK
-@@ -626,6 +728,7 @@
+@@ -641,6 +734,7 @@ static le_result_t GeneratePsk
      snprintf(tmpString,
          sizeof(tmpString),
          (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE),
@@ -2359,7 +2317,7 @@ index bc19b3e..b799119 100644
          ssidLength,
          (char *)ssidBytesPtr,
          passphrasePtr);
-@@ -688,12 +791,14 @@
+@@ -703,12 +797,14 @@ static le_result_t GeneratePsk
  //--------------------------------------------------------------------------------------------------
  static le_result_t GenerateWpaSupplicant
  (
@@ -2376,7 +2334,7 @@ index bc19b3e..b799119 100644
      char     tmpString[255];
      uint8_t  length;
  
-@@ -707,25 +812,33 @@
+@@ -722,25 +818,33 @@ static le_result_t GenerateWpaSupplicant
      }
  
      // Create the WPA supplicant file
@@ -2415,7 +2373,7 @@ index bc19b3e..b799119 100644
      fclose(filePtr);
      return LE_OK;
  }
-@@ -751,12 +864,10 @@
+@@ -766,12 +870,10 @@ le_result_t pa_wifiClient_Connect
  {
      int         systemResult;
      char        tmpString[1024];
@@ -2430,7 +2388,7 @@ index bc19b3e..b799119 100644
  
      if (0 == ssidLength)
      {
-@@ -770,26 +881,43 @@
+@@ -785,26 +887,43 @@ le_result_t pa_wifiClient_Connect
          case LE_WIFICLIENT_SECURITY_NONE:
              // Opened WiFi hotspot (SSID with no password)
              LE_INFO("SwitchCase: LE_WIFICLIENT_SECURITY_NONE");
@@ -2457,12 +2415,12 @@ index bc19b3e..b799119 100644
 +                // 3. Now WPA_CLI for LE_WIFICLIENT_SECURITY_NONE
 +                LE_INFO("Step 3: SH script");
 +                snprintf(tmpString,
-+                    sizeof(tmpString),
-+                    (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_NONE),
-+           	    SavedInterface,
-+                    ssidLength,
-+                    (char *)ssidBytes,
-+                    (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
++                         sizeof(tmpString),
++                         (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_NONE),
++                         SavedInterface,
++                         ssidLength,
++                         (char *)ssidBytes,
++                         (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
 +
 +                systemResult = system(tmpString);
 +                // Return value of -1 means that the fork() has failed (see man system).
@@ -2487,26 +2445,34 @@ index bc19b3e..b799119 100644
              break;
  
          case LE_WIFICLIENT_SECURITY_WEP:
-@@ -807,8 +935,10 @@
+@@ -820,11 +939,13 @@ le_result_t pa_wifiClient_Connect
+             {
+                 LE_INFO("Step 2: SH script");
                  snprintf(tmpString,
-                     sizeof(tmpString),
-                     (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP),
-+		    SavedInterface,
-                     ssidLength,
-                     (char *)ssidBytes,
-+                    (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
-                     SavedWepKey);
+-                    sizeof(tmpString),
+-                    (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP),
+-                    ssidLength,
+-                    (char *)ssidBytes,
+-                    SavedWepKey);
++                         sizeof(tmpString),
++                         (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP),
++                         SavedInterface,
++                         ssidLength,
++                         (char *)ssidBytes,
++                         (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
++                         SavedWepKey);
  
                  systemResult = system(tmpString);
-@@ -841,6 +971,7 @@
+                 // Return value of -1 means that the fork() has failed (see man system).
+@@ -856,6 +977,7 @@ le_result_t pa_wifiClient_Connect
                  result = GeneratePsk((char *)&ssidBytes[0],
                      ssidLength,
                      (char *)&SavedPassphrase[0],
-+		    SavedInterface,
++                                     SavedInterface,
                      (char *)&SavedPreSharedKey[0]);
                  if (LE_OK != result)
                  {
-@@ -856,27 +987,37 @@
+@@ -871,28 +993,38 @@ le_result_t pa_wifiClient_Connect
                  // Generate the WPA supplicant file
                  if (GenerateWpaSupplicant((char *)&ssidBytes[0],
                      ssidLength,
@@ -2518,13 +2484,13 @@ index bc19b3e..b799119 100644
  
 -                    systemResult = system(WIFI_SCRIPT_PATH
 -                        COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL);
-+		    snprintf(tmpString,
++                    snprintf(tmpString,
 +                             sizeof(tmpString),
 +                             (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL),
-+		             SavedInterface,
-+                    	     ssidLength,
-+                    	     (char *)ssidBytes,
-+                    	     (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
++                             SavedInterface,
++                             ssidLength,
++                             (char *)ssidBytes,
++                             (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
 +
 +                    systemResult = system(tmpString);
  
@@ -2544,23 +2510,30 @@ index bc19b3e..b799119 100644
 +                        LE_ERROR("WiFi Client Command('%s') Failed: (%d)", tmpString, systemResult);
                          result = LE_FAULT;
                      }
-+                }
+                 }
 +                else
 +                {
 +                    LE_ERROR("GenerateWpaSupplicant() Failed");
 +                    result = LE_FAULT;
-                 }
++                }
              }
              break;
-@@ -896,6 +1037,7 @@
+ 
+@@ -909,9 +1041,10 @@ le_result_t pa_wifiClient_Connect
+             {
+                 // ... so the PSK is derived from it.
                  result = GeneratePsk((char *)&ssidBytes[0],
-                     ssidLength,
-                     (char *)&SavedPassphrase,
-+		    SavedInterface,
-                     (char *)&SavedPreSharedKey);
+-                    ssidLength,
+-                    (char *)&SavedPassphrase,
+-                    (char *)&SavedPreSharedKey);
++                                     ssidLength,
++                                     (char *)&SavedPassphrase,
++                                     SavedInterface,
++                                     (char *)&SavedPreSharedKey);
                  if (LE_OK != result)
                  {
-@@ -911,27 +1053,37 @@
+                     LE_ERROR("No valid PassPhrase or PreSharedKey");
+@@ -926,28 +1059,38 @@ le_result_t pa_wifiClient_Connect
                  // Generate the WPA supplicant file
                  if (GenerateWpaSupplicant((char *)&ssidBytes[0],
                      ssidLength,
@@ -2572,13 +2545,13 @@ index bc19b3e..b799119 100644
  
 -                    systemResult = system(WIFI_SCRIPT_PATH
 -                        COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL);
-+		    snprintf(tmpString,
++                    snprintf(tmpString,
 +                             sizeof(tmpString),
 +                             (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL),
-+		             SavedInterface,
-+                    	     ssidLength,
-+                    	     (char *)ssidBytes,
-+                    	     (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
++                             SavedInterface,
++                             ssidLength,
++                             (char *)ssidBytes,
++                             (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext");
 +
 +                    systemResult = system(tmpString);
  
@@ -2598,26 +2571,35 @@ index bc19b3e..b799119 100644
 +                        LE_ERROR("WiFi Client Command('%s') Failed: (%d)", tmpString, systemResult);
                          result = LE_FAULT;
                      }
-+                }
+                 }
 +                else
 +                {
 +                    LE_ERROR("GenerateWpaSupplicant() Failed");
 +                    result = LE_FAULT;
-                 }
++                }
              }
              break;
-@@ -951,8 +1103,10 @@
-                 snprintf(tmpString,
-                     sizeof(tmpString),
-                     (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE),
-+		    SavedInterface,
-                     ssidLength,
-                     (char *)ssidBytes,
-+                    (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
-                     SavedUsername,
-                     SavedPassword);
  
-@@ -960,12 +1114,12 @@
+@@ -964,23 +1107,25 @@ le_result_t pa_wifiClient_Connect
+             {
+                 LE_INFO("Step 2: SH script");
+                 snprintf(tmpString,
+-                    sizeof(tmpString),
+-                    (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE),
+-                    ssidLength,
+-                    (char *)ssidBytes,
+-                    SavedUsername,
+-                    SavedPassword);
++                         sizeof(tmpString),
++                         (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE),
++                         SavedInterface,
++                         ssidLength,
++                         (char *)ssidBytes,
++                         (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
++                         SavedUsername,
++                         SavedPassword);
+ 
+                 systemResult = system(tmpString);
                  // Return value of -1 means that the fork() has failed (see man system).
                  if (0 == WEXITSTATUS(systemResult))
                  {
@@ -2632,18 +2614,26 @@ index bc19b3e..b799119 100644
                      result = LE_FAULT;
                  }
              }
-@@ -986,8 +1140,10 @@
+@@ -999,23 +1144,25 @@ le_result_t pa_wifiClient_Connect
+             {
+                 LE_INFO("Step 2: SH script");
                  snprintf(tmpString,
-                     sizeof(tmpString),
-                     (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE),
-+		    SavedInterface,
-                     ssidLength,
-                     (char *)ssidBytes,
-+                    (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
-                     SavedUsername,
-                     SavedPassword);
+-                    sizeof(tmpString),
+-                    (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE),
+-                    ssidLength,
+-                    (char *)ssidBytes,
+-                    SavedUsername,
+-                    SavedPassword);
++                         sizeof(tmpString),
++                         (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE),
++                         SavedInterface,
++                         ssidLength,
++                         (char *)ssidBytes,
++                         (SavedWpaDriver == LE_WIFICLIENT_DRIVER_NL80211) ? "nl80211":"wext",
++                         SavedUsername,
++                         SavedPassword);
  
-@@ -995,12 +1151,12 @@
+                 systemResult = system(tmpString);
                  // Return value of -1 means that the fork() has failed (see man system).
                  if (0 == WEXITSTATUS(systemResult))
                  {
@@ -2658,7 +2648,7 @@ index bc19b3e..b799119 100644
                      result = LE_FAULT;
                  }
              }
-@@ -1026,19 +1182,25 @@
+@@ -1041,19 +1188,25 @@ le_result_t pa_wifiClient_Disconnect
      void
  )
  {
@@ -2687,7 +2677,7 @@ index bc19b3e..b799119 100644
          result = LE_FAULT;
      }
      return result;
-@@ -1133,6 +1295,78 @@
+@@ -1148,6 +1301,78 @@ le_result_t pa_wifiClient_SetPreSharedKey
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -2717,7 +2707,7 @@ index bc19b3e..b799119 100644
 +            (length <= LE_WIFIDEFS_MAX_INTERFACE_LENGTH))
 +        {
 +           strncpy(SavedInterface, interfacePtr, LE_WIFIDEFS_MAX_INTERFACE_LENGTH);
-+	   strncpy(setEventInfo.interface, interfacePtr, LE_WIFIDEFS_MAX_INTERFACE_LENGTH);
++           strncpy(setEventInfo.interface, interfacePtr, LE_WIFIDEFS_MAX_INTERFACE_LENGTH);
 +           result = LE_OK;
 +        }
 +        else
@@ -2766,7 +2756,7 @@ index bc19b3e..b799119 100644
   * Set the PassPhrase used to create PSK (WPA-Personal).
   *
   * @see  pa_wifiClient_SetPreSharedKey
-@@ -1157,7 +1391,6 @@
+@@ -1172,7 +1397,6 @@ le_result_t pa_wifiClient_SetPassphrase
      {
          length = strlen(passphrasePtr);
  
@@ -2819,7 +2809,7 @@ index 5e06067..c40432a 100644
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -184,12 +180,17 @@
+@@ -184,12 +180,17 @@ static void *WifiClientPaThreadMain
      void *contextPtr
  )
  {
@@ -2838,7 +2828,7 @@ index 5e06067..c40432a 100644
      IwThreadPipePtr = popen(tmpString, "r");
  
      if (NULL == IwThreadPipePtr)
-@@ -279,7 +280,12 @@
+@@ -279,7 +280,12 @@ le_result_t pa_wifiClient_Release
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiClient_Start
  (
@@ -2852,7 +2842,7 @@ index 5e06067..c40432a 100644
  )
  {
      le_result_t result       = LE_FAULT;
-@@ -293,7 +299,14 @@
+@@ -293,7 +299,14 @@ le_result_t pa_wifiClient_Start
      le_thread_AddDestructor(ThreadDestructor, NULL);
      le_thread_Start(WifiClientPaThread);
  
@@ -2868,7 +2858,7 @@ index 5e06067..c40432a 100644
      /**
       * Return value of -1 means that the fork() has failed (see man system).
       * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -303,25 +316,32 @@
+@@ -303,25 +316,32 @@ le_result_t pa_wifiClient_Start
       */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -2906,7 +2896,7 @@ index 5e06067..c40432a 100644
              result = LE_FAULT;
          }
      }
-@@ -338,11 +358,26 @@
+@@ -338,11 +358,26 @@ le_result_t pa_wifiClient_Start
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiClient_Stop
  (
@@ -2935,7 +2925,7 @@ index 5e06067..c40432a 100644
  
      /**
       * Return value of -1 means that the fork() has failed (see man system).
-@@ -353,12 +388,12 @@
+@@ -353,12 +388,12 @@ le_result_t pa_wifiClient_Stop
      */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -2950,7 +2940,7 @@ index 5e06067..c40432a 100644
          result = LE_FAULT;
      }
  
-@@ -395,9 +430,15 @@
+@@ -395,9 +430,15 @@ le_result_t pa_wifiClient_Stop
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiClient_Scan
  (
@@ -2967,7 +2957,7 @@ index 5e06067..c40432a 100644
      le_result_t result = LE_OK;
  
      LE_INFO("Scanning");
-@@ -412,14 +453,20 @@
+@@ -412,14 +453,20 @@ le_result_t pa_wifiClient_Scan
          return LE_BUSY;
      }
  
@@ -2990,7 +2980,7 @@ index 5e06067..c40432a 100644
              errno,
              strerror(errno));
          result = LE_FAULT;
-@@ -580,9 +627,15 @@
+@@ -580,9 +627,15 @@ le_result_t pa_wifiClient_Connect
      uint8_t ssidBytes[LE_WIFIDEFS_MAX_SSID_BYTES],
          ///< [IN]
          ///< Contains ssidLength number of bytes
@@ -3007,7 +2997,7 @@ index 5e06067..c40432a 100644
  )
  {
      int         systemResult;
-@@ -609,8 +662,11 @@
+@@ -609,8 +662,11 @@ le_result_t pa_wifiClient_Connect
              snprintf(tmpString,
                  sizeof(tmpString),
                  (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_NONE),
@@ -3020,7 +3010,7 @@ index 5e06067..c40432a 100644
  
              systemResult = system(tmpString);
              // Return value of -1 means that the fork() has failed (see man system).
-@@ -641,8 +697,11 @@
+@@ -641,8 +697,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WEP),
@@ -3032,7 +3022,7 @@ index 5e06067..c40432a 100644
                      SavedWepKey);
  
                  systemResult = system(tmpString);
-@@ -668,6 +727,7 @@
+@@ -668,6 +727,7 @@ le_result_t pa_wifiClient_Connect
                  LE_ERROR("No valid PassPhrase & PreSharedKey");
                  return LE_FAULT;
              }
@@ -3040,7 +3030,7 @@ index 5e06067..c40432a 100644
              if (0 != SavedPassphrase[0])
              {
                  // 1. Passphrase/PSK. With PassPhrase generate PSK and read it for next command
-@@ -675,9 +735,11 @@
+@@ -675,9 +735,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE),
@@ -3053,7 +3043,7 @@ index 5e06067..c40432a 100644
  
                  LE_INFO("Cmd: %s", tmpString);
  
-@@ -729,10 +791,11 @@
+@@ -729,10 +791,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_PSK_PERSONAL),
@@ -3067,7 +3057,7 @@ index 5e06067..c40432a 100644
  
                  systemResult = system(tmpString);
                  // Return value of -1 means that the fork() has failed (see man system).
-@@ -764,9 +827,11 @@
+@@ -764,9 +827,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString) ,
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_WPA_PASSPHRASE),
@@ -3080,7 +3070,7 @@ index 5e06067..c40432a 100644
  
                  LE_INFO("Cmd: %s", tmpString);
  
-@@ -816,10 +881,11 @@
+@@ -816,10 +881,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_PSK_PERSONAL),
@@ -3094,7 +3084,7 @@ index 5e06067..c40432a 100644
  
                  systemResult = system(tmpString);
                  // Return value of -1 means that the fork() has failed (see man system).
-@@ -851,8 +917,11 @@
+@@ -851,8 +917,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA_EAP_PEAP0_ENTERPRISE),
@@ -3106,7 +3096,7 @@ index 5e06067..c40432a 100644
                      SavedUsername,
                      SavedPassword);
  
-@@ -886,8 +955,11 @@
+@@ -886,8 +955,11 @@ le_result_t pa_wifiClient_Connect
                  snprintf(tmpString,
                      sizeof(tmpString),
                      (WIFI_SCRIPT_PATH COMMAND_WIFICLIENT_CONNECT_SECURITY_WPA2_EAP_PEAP0_ENTERPRISE),
@@ -3118,7 +3108,7 @@ index 5e06067..c40432a 100644
                      SavedUsername,
                      SavedPassword);
  
-@@ -923,22 +995,34 @@
+@@ -923,22 +995,34 @@ le_result_t pa_wifiClient_Connect
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiClient_Disconnect
  (
@@ -3157,3 +3147,6 @@ index 5e06067..c40432a 100644
          result = LE_FAULT;
      }
      return result;
+-- 
+2.11.0
+

@@ -8,56 +8,42 @@ fi
 
 LEGATO_ROOT=$1
 
-apply_patch() {
-    patch_file=`pwd`/$1
-    patch_root=${LEGATO_ROOT}/$2
-    echo "---------------------------"
-    echo "Applying: ${patch_file}"
-    echo "At path: ${patch_root}"
-    echo "---------------------------"
-    export patch_root
-    export patch_file
-    (cd ${patch_root} && patch -p1 < ${patch_file})
+if ! [ -d $LEGATO_ROOT ]
+then
+    echo "\"$LEGATO_ROOT\" does is not a directory"
+    exit 1
+fi
+
+NOW=`date +"%Y-%m-%d_%H_%M_%S"`
+PATCH_BRANCH="mangOH_patches_$NOW"
+PATCH_BASE="17.11.0"
+
+apply_patchset() {
+    PATCH_SRC_DIR=`readlink -f $1`
+    PATCH_DEST_DIR=$2
+    echo "==========================="
+    echo "Applying patches from $PATCH_SRC_DIR to $PATCH_DEST_DIR on branch $PATCH_BRANCH"
+    echo "==========================="
+    (cd $PATCH_DEST_DIR && git checkout -b $PATCH_BRANCH $PATCH_BASE)
     if [ $? -ne 0 ]
     then
-        echo "Failed to apply patch"
-        exit 1
+        echo "Couldn't create branch in $PATCH_DEST_DIR"
+        exit $?
     fi
+    (cd $PATCH_DEST_DIR && git am $PATCH_SRC_DIR/*.patch)
+    if [ $? -ne 0 ]
+    then
+        echo "Command failed with exit code: $?"
+        exit $?
+    fi
+    echo "==========================="
 }
 
-apply_patch \
-    "00 - 22455 - Legato - Add mangOH Red mt7697 wifi support.patch" \
-    "."
-apply_patch \
-    "01 - 22456 - Legato WiFi - Add support for multiple wlan interfaces.patch" \
-    "modules/WiFi"
-apply_patch \
-    "02 - 22463 - wakaama - Only re-authenticate before tx blk 1 of a message.patch" \
-    "3rdParty/Lwm2mCore/wakaama"
-apply_patch \
-    "03 - 22461 - wakaama - Fix bug in ACK handling.patch" \
-    "3rdParty/Lwm2mCore/wakaama"
-apply_patch \
-    "04 - 22462 - wakaama - Continue retrying block when 408 error is received.patch" \
-    "3rdParty/Lwm2mCore/wakaama"
-apply_patch \
-    "05 - 22460 - lwmwmcore - Only re-authenticate before tx blk 1 of a message.patch" \
-    "3rdParty/Lwm2mCore"
-apply_patch \
-    "06 - XXXXX - Legato WiFi - Fix SSID greater than 25 bytes.patch" \
-    "modules/WiFi"
-apply_patch \
-    "07 - XXXXX - Legato WiFi - Fix returned scan results.patch" \
-    "modules/WiFi"
-apply_patch \
-    "08 - XXXXX - Legato WiFi - Fix blocking call waiting for connection.patch" \
-    "modules/WiFi"
-apply_patch \
-    "09 - XXXXX - Legato AV Connector - Fix session started state on disconnect.patch" \
-    "apps/platformServices/airVantageConnector"
-apply_patch \
-    "10 - XXXXX - Legato AV Connector - Fix unhandled update state.patch" \
-    "apps/platformServices/airVantageConnector"
-    
+apply_patchset legato       $LEGATO_ROOT
+apply_patchset wifi         $LEGATO_ROOT/modules/WiFi
+apply_patchset av_connector $LEGATO_ROOT/apps/platformServices/airVantageConnector
+apply_patchset lwm2mcore    $LEGATO_ROOT/3rdParty/Lwm2mCore
+apply_patchset wakaama      $LEGATO_ROOT/3rdParty/Lwm2mCore/wakaama
+
 echo "==========================="
 echo "All patches applied successfully"
