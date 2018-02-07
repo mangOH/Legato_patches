@@ -16,7 +16,7 @@ fi
 
 NOW=`date +"%Y-%m-%d_%H_%M_%S"`
 PATCH_BRANCH="mangOH_patches_$NOW"
-PATCH_BASE="17.11.0"
+PATCH_BASE="18.01.0"
 
 apply_patchset() {
     PATCH_SRC_DIR=`readlink -f $1`
@@ -41,9 +41,6 @@ apply_patchset() {
 
 apply_patchset legato       $LEGATO_ROOT
 apply_patchset wifi         $LEGATO_ROOT/modules/WiFi
-apply_patchset av_connector $LEGATO_ROOT/apps/platformServices/airVantageConnector
-apply_patchset lwm2mcore    $LEGATO_ROOT/3rdParty/Lwm2mCore
-apply_patchset wakaama      $LEGATO_ROOT/3rdParty/Lwm2mCore/wakaama
 
 echo "==========================="
 echo "All patches applied successfully"

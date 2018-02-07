@@ -1,7 +1,7 @@
-From 89ebd0d4d7f4036d97e51f70193a20f7c3d15658 Mon Sep 17 00:00:00 2001
+From 06b736d00ddcfa0ea0d881f2511657953b392c25 Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Tue, 12 Dec 2017 14:12:30 -0800
-Subject: [PATCH] Add support for multiple wlan interfaces
+Subject: [PATCH 2/2] Add support for multiple wlan interfaces
 
 The wifi service and wifi web application now suport dynamic selection of the
 interface and wpa_supplicant driver.
@@ -229,7 +229,7 @@ index 4d86710..5cd8731 100755
  echo -ne "<font color=\"black\" >$(date "+%T"):</font> Restarting the DHCP server...<br>\r\n" >> ${LOG_MSG_FILE}
  /etc/init.d/dnsmasq start  || echo -ne ">>>>>>>>>>>>>>>>>>> UNABLE TO START THE DHCP server\n" >> ${LOG_CMD_FILE}
 diff --git a/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/wifiexport b/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/wifiexport
-index bdf8215..1ea68e2 100644
+index 82d0c0e..f5f9c4a 100644
 --- a/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/wifiexport
 +++ b/apps/sample/wifiWebAp/wifiWebApComponent/www/cgi-bin/wifiexport
 @@ -4,7 +4,7 @@
@@ -239,7 +239,7 @@ index bdf8215..1ea68e2 100644
 -export ITF_LAN="wlan0" # WiFi? access point interface
 +
  # Select either 3G/4G or ethernet as WLAN interface
- ifconfig | grep -q rmnet_data
+ ifconfig -a | grep -q "rmnet_data0"
  if [ $? -eq 0 ]; then
 diff --git a/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html b/apps/sample/wifiWebAp/wifiWebApComponent/www/index.html
 index ed59523..5526f4d 100644
@@ -1064,7 +1064,7 @@ index cadaa53..5a65f42 100644
  );
  #endif // PA_WIFI_AP_H
 diff --git a/service/platformAdaptor/ti/pa_wifi.sh b/service/platformAdaptor/ti/pa_wifi.sh
-index 2ae101a..e6c6bb7 100644
+index 1fcfe83..56a74ab 100644
 --- a/service/platformAdaptor/ti/pa_wifi.sh
 +++ b/service/platformAdaptor/ti/pa_wifi.sh
 @@ -12,8 +12,9 @@
@@ -1133,8 +1133,8 @@ index 2ae101a..e6c6bb7 100644
 +
    WIFICLIENT_START_SCAN)
      echo "WIFICLIENT_START_SCAN"
--    (/usr/sbin/iw dev wlan0 scan | grep 'SSID\|signal') || exit 96
-+    (/usr/sbin/iw ${IFACE} scan | grep 'BSS\|SSID\|signal') || exit 96
+-    (/usr/sbin/iw dev wlan0 scan | grep 'BSS\|SSID\|signal') || exit 96
++    (/usr/sbin/iw dev ${IFACE} scan | grep 'BSS\|SSID\|signal') || exit 96
      exit 0 ;;
  
    WIFICLIENT_DISCONNECT)

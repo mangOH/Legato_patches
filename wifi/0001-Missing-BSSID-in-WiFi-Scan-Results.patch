@@ -1,0 +1,31 @@
+From d6ab47985391c916d62e1e3e1c4cd18bd4c8a7f4 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Wed, 31 Jan 2018 14:50:16 -0800
+Subject: [PATCH 1/2] Missing BSSID in WiFi Scan Results
+
+Updated the PA WiFi script to parse the BSSIDs which
+are reuqired as the identifier for the scanned access
+points (AP) list.
+
+Resolves: LE-9186
+Change-Id: I36951fbfe88204091c6278870caa3b6f47a55474
+---
+ service/platformAdaptor/ti/pa_wifi.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/service/platformAdaptor/ti/pa_wifi.sh b/service/platformAdaptor/ti/pa_wifi.sh
+index 2ae101a..1fcfe83 100644
+--- a/service/platformAdaptor/ti/pa_wifi.sh
++++ b/service/platformAdaptor/ti/pa_wifi.sh
+@@ -99,7 +99,7 @@ case ${CMD} in
+ 
+   WIFICLIENT_START_SCAN)
+     echo "WIFICLIENT_START_SCAN"
+-    (/usr/sbin/iw dev wlan0 scan | grep 'SSID\|signal') || exit 96
++    (/usr/sbin/iw dev wlan0 scan | grep 'BSS\|SSID\|signal') || exit 96
+     exit 0 ;;
+ 
+   WIFICLIENT_DISCONNECT)
+-- 
+2.11.0
+
