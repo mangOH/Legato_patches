@@ -1,4 +1,4 @@
-From e7048a92c559e1d7014ac5382235c0ba1990d130 Mon Sep 17 00:00:00 2001
+From a5820ee1adab3e62d0330dc0ea51d5211e7e796b Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Fri, 3 Nov 2017 10:16:34 -0700
 Subject: [PATCH 2/2] Add mangOH Red mt7697 wifi support
@@ -12,14 +12,14 @@ Signed-off-by: David Clark <dclark@sierrawireless.com>
 ---
  .../dataConnectionUnitTest/interfaces.h            |   8 +-
  .../dataConnectionUnitTest/main.c                  |   2 +
- .../dataConnectionService/dcsDaemon/dcsServer.c    | 205 +++++++++++++++------
+ .../dataConnectionService/dcsDaemon/dcsServer.c    | 211 +++++++++++++++------
  interfaces/wifi/le_wifiAp.api                      |  67 ++++++-
  interfaces/wifi/le_wifiClient.api                  |  65 ++++++-
  interfaces/wifi/le_wifiDefs.api                    |  23 +++
- 6 files changed, 309 insertions(+), 61 deletions(-)
+ 6 files changed, 312 insertions(+), 64 deletions(-)
 
 diff --git a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
-index 262ca3114..3abc472e1 100644
+index 262ca3114..2b3bc0892 100644
 --- a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
 +++ b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
 @@ -32,9 +32,11 @@
@@ -29,11 +29,11 @@ index 262ca3114..3abc472e1 100644
 -#define CFG_NODE_SSID               "SSID"
 -#define CFG_NODE_SECPROTOCOL        "secProtocol"
 -#define CFG_NODE_PASSPHRASE         "passphrase"
-+#define CFG_NODE_SSID                   "SSID"
-+#define CFG_NODE_INTERFACE	    	"Interface"
-+#define CFG_NODE_WPA_SUPPLICANT_DRIVER	"WpaSupplicantDriver"
-+#define CFG_NODE_SECPROTOCOL        	"secProtocol"
-+#define CFG_NODE_PASSPHRASE         	"passphrase"
++#define CFG_NODE_SSID                  "SSID"
++#define CFG_NODE_INTERFACE             "Interface"
++#define CFG_NODE_WPA_SUPPLICANT_DRIVER "WpaSupplicantDriver"
++#define CFG_NODE_SECPROTOCOL           "secProtocol"
++#define CFG_NODE_PASSPHRASE            "passphrase"
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -51,10 +51,10 @@ index 270b8a4e0..dfdc3a41e 100644
      LE_INFO("Simulate cellular disconnection");
  
 diff --git a/components/dataConnectionService/dcsDaemon/dcsServer.c b/components/dataConnectionService/dcsDaemon/dcsServer.c
-index 1edad3b73..3a3bc6007 100644
+index 1edad3b73..d5f0e8bab 100644
 --- a/components/dataConnectionService/dcsDaemon/dcsServer.c
 +++ b/components/dataConnectionService/dcsDaemon/dcsServer.c
-@@ -50,15 +50,17 @@
+@@ -50,18 +50,20 @@
   * The config tree path and node definitions.
   */
  //--------------------------------------------------------------------------------------------------
@@ -67,7 +67,10 @@ index 1edad3b73..3a3bc6007 100644
 -#define CFG_NODE_PASSPHRASE         "passphrase"
 -#define CFG_PATH_CELLULAR           "cellular"
 -#define CFG_NODE_PROFILEINDEX       "profileIndex"
-+#define DCS_CONFIG_TREE_ROOT_DIR                "dataConnectionService:"
+-#define CFG_PATH_TIME               "time"
+-#define CFG_NODE_PROTOCOL           "protocol"
+-#define CFG_NODE_SERVER             "server"
++#define DCS_CONFIG_TREE_ROOT_DIR            "dataConnectionService:"
 +#define CFG_PATH_ROUTING            		"routing"
 +#define CFG_NODE_DEFAULTROUTE       		"useDefaultRoute"
 +#define CFG_PATH_WIFI               		"wifi"
@@ -78,9 +81,12 @@ index 1edad3b73..3a3bc6007 100644
 +#define CFG_WIFI_NODE_PASSPHRASE         	"passphrase"
 +#define CFG_PATH_CELLULAR           		"cellular"
 +#define CFG_CELL_NODE_PROFILEINDEX       	"profileIndex"
- #define CFG_PATH_TIME               "time"
- #define CFG_NODE_PROTOCOL           "protocol"
- #define CFG_NODE_SERVER             "server"
++#define CFG_PATH_TIME                       "time"
++#define CFG_NODE_PROTOCOL                   "protocol"
++#define CFG_NODE_SERVER                     "server"
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
 @@ -88,14 +90,6 @@
  
  //--------------------------------------------------------------------------------------------------
@@ -291,7 +297,7 @@ index 1edad3b73..3a3bc6007 100644
              // Passphrase
              // TODO: passphrase should not be stored without ciphering in the config tree
 -            if (le_cfg_NodeExists(cfg, CFG_NODE_PASSPHRASE))
-+            if ((SecProtocol != LE_WIFICLIENT_SECURITY_NONE) && 
++            if ((SecProtocol != LE_WIFICLIENT_SECURITY_NONE) &&
 +                le_cfg_NodeExists(cfg, CFG_WIFI_NODE_PASSPHRASE))
              {
 -                if (LE_OK != le_cfg_GetString(cfg, CFG_NODE_PASSPHRASE, Passphrase,
@@ -334,7 +340,7 @@ index 1edad3b73..3a3bc6007 100644
 +                    return result;
 +                }
 +
-+		if (SecProtocol != LE_WIFICLIENT_SECURITY_NONE) {
++                if (SecProtocol != LE_WIFICLIENT_SECURITY_NONE) {
 +                    result = le_wifiClient_SetPassphrase(AccessPointRef, Passphrase);
 +                    if (result != LE_OK)
 +                    {
@@ -343,7 +349,7 @@ index 1edad3b73..3a3bc6007 100644
 +                    }
 +                }
 +
-+		result = le_wifiClient_SetWpaSupplicantDriver(AccessPointRef, 
++                result = le_wifiClient_SetWpaSupplicantDriver(AccessPointRef,
 +                                                              WpaSupplicantDriver);
 +                if (result != LE_OK)
 +                {
@@ -357,8 +363,8 @@ index 1edad3b73..3a3bc6007 100644
              }
  
              // Delete sensitive information
-+	    memset(WpaSupplicantDriver, '\0', sizeof(WpaSupplicantDriver));
-+	    memset(WiFiInterface, '\0', sizeof(WiFiInterface));
++            memset(WpaSupplicantDriver, '\0', sizeof(WpaSupplicantDriver));
++            memset(WiFiInterface, '\0', sizeof(WiFiInterface));
              memset(Ssid, '\0', sizeof(Ssid));
              memset(Passphrase, '\0', sizeof(Passphrase));
          }
@@ -536,7 +542,7 @@ index ebdee1a3c..a9402d196 100644
 +    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface of the Access Point.
  );
 diff --git a/interfaces/wifi/le_wifiClient.api b/interfaces/wifi/le_wifiClient.api
-index 4bcfafa5a..7925d7f38 100644
+index 4bcfafa5a..3e3115d22 100644
 --- a/interfaces/wifi/le_wifiClient.api
 +++ b/interfaces/wifi/le_wifiClient.api
 @@ -197,6 +197,17 @@ REFERENCE AccessPoint;
@@ -584,7 +590,7 @@ index 4bcfafa5a..7925d7f38 100644
 +FUNCTION le_result_t SetWpaSupplicantDriver
 +(
 +    AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
-+    string wpaSupplicantDriver[le_wifiDefs.MAX_WPA_SUPPLICANT_DRIVER_BYTES] 
++    string wpaSupplicantDriver[le_wifiDefs.MAX_WPA_SUPPLICANT_DRIVER_BYTES]
 +                                   IN ///< WPA Supplicant Driver
 +);
  

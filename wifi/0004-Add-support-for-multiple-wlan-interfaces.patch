@@ -1,7 +1,7 @@
-From 9b4b70a7d6b71794b503dcbf40366705d7f101ee Mon Sep 17 00:00:00 2001
+From 89ebd0d4d7f4036d97e51f70193a20f7c3d15658 Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Tue, 12 Dec 2017 14:12:30 -0800
-Subject: [PATCH 4/4] Add support for multiple wlan interfaces
+Subject: [PATCH] Add support for multiple wlan interfaces
 
 The wifi service and wifi web application now suport dynamic selection of the
 interface and wpa_supplicant driver.
@@ -19,17 +19,17 @@ Signed-off-by: David Clark <dclark@sierrawireless.com>
  apps/tools/wifi/wifi/wifi_ap.c                     | 110 ++++-
  apps/tools/wifi/wifi/wifi_client.c                 |  92 +++-
  service/daemon/le_wifiAp.c                         |  75 +++-
- service/daemon/le_wifiClient.c                     | 143 ++++++-
+ service/daemon/le_wifiClient.c                     | 137 +++++-
  service/platformAdaptor/inc/pa_wifi.h              |  53 +++
  service/platformAdaptor/inc/pa_wifi_ap.h           |  28 +-
  service/platformAdaptor/ti/pa_wifi.sh              |  78 ++--
- service/platformAdaptor/ti/pa_wifi_ap_ti.c         | 357 +++++++++++-----
+ service/platformAdaptor/ti/pa_wifi_ap_ti.c         | 345 +++++++++++----
  service/platformAdaptor/ti/pa_wifi_client_ti.c     | 476 +++++++++++++++------
  .../platformAdaptor/ti_simu/pa_wifi_client_ti.c    | 176 ++++++--
- 16 files changed, 1296 insertions(+), 366 deletions(-)
+ 16 files changed, 1292 insertions(+), 352 deletions(-)
 
 diff --git a/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c b/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c
-index c97fb35..2f2bdcc 100644
+index c97fb35..8f8f244 100644
 --- a/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c
 +++ b/apps/sample/wifiApTest/wifiApTestComponent/wifiApTest.c
 @@ -12,7 +12,8 @@
@@ -37,8 +37,8 @@ index c97fb35..2f2bdcc 100644
  //                                       Test Function Variable defines
  //--------------------------------------------------------------------------------------------------
 -#define TEST_SSID_STR "wifiApSSID"
-+#define TEST_SSID_STR 		"wifiApSSID"
-+#define TEST_INTERFACE_STR 	"wlan0"
++#define TEST_SSID_STR      "wifiApSSID"
++#define TEST_INTERFACE_STR "wlan0"
  
  #define TEST_SECU_PROTO LE_WIFIAP_SECURITY_WPA2
  #define TEST_PASSPHRASE "passphrase"
@@ -67,7 +67,7 @@ index c97fb35..2f2bdcc 100644
      }
  
 -    LE_ASSERT(LE_OK == le_wifiAp_SetIpRange(HOST_IP, IP_RANGE_START, IP_RANGE_END));
-+    LE_ASSERT(LE_OK == le_wifiAp_SetIpRange(HOST_IP, IP_RANGE_START, IP_RANGE_END, 
++    LE_ASSERT(LE_OK == le_wifiAp_SetIpRange(HOST_IP, IP_RANGE_START, IP_RANGE_END,
 +                                            TEST_INTERFACE_STR));
  }
  //! [Subscribe]
@@ -740,7 +740,7 @@ index 0990c5d..709596b 100644
  }
  
 diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
-index ea1a6ca..cfb80a5 100644
+index ea1a6ca..8061701 100644
 --- a/service/daemon/le_wifiClient.c
 +++ b/service/daemon/le_wifiClient.c
 @@ -232,9 +232,10 @@ static le_wifiClient_AccessPointRef_t AddAccessPointToApRefMap
@@ -752,7 +752,7 @@ index ea1a6ca..cfb80a5 100644
 +            LE_DEBUG("Already exists %p. Update  SignalStrength %d, BSSID '%s'",
 +                returnedRef, apPtr->signalStrength, apPtr->bssid);
  
-+	    strncpy(oldAccessPointPtr->accessPoint.bssid, apPtr->bssid, sizeof(apPtr->bssid));
++            strncpy(oldAccessPointPtr->accessPoint.bssid, apPtr->bssid, sizeof(apPtr->bssid));
              oldAccessPointPtr->accessPoint.signalStrength = apPtr->signalStrength;
              oldAccessPointPtr->foundInLatestScan = true;
          }
@@ -783,33 +783,6 @@ index ea1a6ca..cfb80a5 100644
      if (LE_OK != paResult)
      {
          LE_ERROR("Scan failed (%d)", paResult);
-@@ -603,7 +606,7 @@ le_result_t le_wifiClient_Start
-     // first client starts the hardware
-     if (1 == ClientStartCount)
-     {
--        pa_result = pa_wifiClient_Start();
-+	pa_result = pa_wifiClient_Start();
-     }
- 
-     if (LE_OK != pa_result)
-@@ -627,7 +630,7 @@ le_result_t le_wifiClient_Start
- //--------------------------------------------------------------------------------------------------
- le_result_t le_wifiClient_Stop
- (
--    void
-+    void 
- )
- {
-     if (ClientStartCount)
-@@ -639,7 +642,7 @@ le_result_t le_wifiClient_Stop
-         // last client closes the hardware
-         if (0 == ClientStartCount)
-         {
--            LE_INFO("Clearing credentials...");
-+	    LE_INFO("Clearing credentials...");
-             pa_wifiClient_ClearAllCredentials();
-             LE_INFO("Stopping client...");
-             pa_wifiClient_Stop();
 @@ -873,6 +876,7 @@ le_result_t le_wifiClient_GetBssid
      return LE_OK;
  }
@@ -837,7 +810,7 @@ index ea1a6ca..cfb80a5 100644
 +        ///< WiFi Access Point reference.
 +
 +    const char *wpaSupplicantDriver
-+	///< [IN]
++        ///< [IN]
 +        ///< WPA Supplicant driver.
 +)
 +{
@@ -1262,7 +1235,7 @@ index 2ae101a..e6c6bb7 100644
      /sbin/wpa_cli -i${IFACE} disconnect
      for i in `/sbin/wpa_cli -i${IFACE} list_networks | grep ^[0-9] | cut -f1`; do
 diff --git a/service/platformAdaptor/ti/pa_wifi_ap_ti.c b/service/platformAdaptor/ti/pa_wifi_ap_ti.c
-index 435b532..b32ac6f 100644
+index 435b532..fa08159 100644
 --- a/service/platformAdaptor/ti/pa_wifi_ap_ti.c
 +++ b/service/platformAdaptor/ti/pa_wifi_ap_ti.c
 @@ -19,15 +19,17 @@
@@ -1278,54 +1251,29 @@ index 435b532..b32ac6f 100644
 -
 -// iptables rule to allow/disallow the DHCP port on wlan0
 -#define COMMAND_IPTABLE_DHCP_WLAN0   "INPUT -i wlan0 -p udp -m udp " \
-+#define COMMAND_WIFI_HW_START        		"%s WIFI_START"
-+#define COMMAND_WIFI_HW_STOP         		"%s WIFI_STOP"
-+#define COMMAND_WIFI_WLAN_UP         		"%s WIFI_WLAN_UP"
-+#define COMMAND_WIFI_SET_EVENT       		"\"%.*s\" WIFI_SET_EVENT"
-+#define COMMAND_WIFIAP_HOSTAPD_START 		"%s WIFIAP_HOSTAPD_START"
-+#define COMMAND_WIFIAP_HOSTAPD_STOP  		"%s WIFIAP_HOSTAPD_STOP"
-+#define COMMAND_WIFIAP_WPA_SUPPLICANT_START 	"%s WIFIAP_WPA_SUPPLICANT_START"
-+#define COMMAND_WIFIAP_WPA_SUPPLICANT_STOP  	"%s WIFIAP_WPA_SUPPLICANT_STOP"
++#define COMMAND_WIFI_HW_START               "%s WIFI_START"
++#define COMMAND_WIFI_HW_STOP                "%s WIFI_STOP"
++#define COMMAND_WIFI_WLAN_UP                "%s WIFI_WLAN_UP"
++#define COMMAND_WIFI_SET_EVENT              "\"%.*s\" WIFI_SET_EVENT"
++#define COMMAND_WIFIAP_HOSTAPD_START        "%s WIFIAP_HOSTAPD_START"
++#define COMMAND_WIFIAP_HOSTAPD_STOP         "%s WIFIAP_HOSTAPD_STOP"
++#define COMMAND_WIFIAP_WPA_SUPPLICANT_START "%s WIFIAP_WPA_SUPPLICANT_START"
++#define COMMAND_WIFIAP_WPA_SUPPLICANT_STOP  "%s WIFIAP_WPA_SUPPLICANT_STOP"
 +
 +// iptables rule to allow/disallow the DHCP port on wlan interface
 +#define COMMAND_IPTABLE_DHCP_WLAN   "INPUT -i %s -p udp -m udp " \
                                       "--sport 67:68 --dport 67:68 -j ACCEPT"
  
  //--------------------------------------------------------------------------------------------------
-@@ -35,27 +37,28 @@
-  * WiFi platform adaptor shell script
+@@ -56,6 +58,7 @@
   */
  //--------------------------------------------------------------------------------------------------
--#define WIFI_SCRIPT_PATH "/legato/systems/current/apps/wifiService/read-only/pa_wifi.sh "
-+#define WIFI_SCRIPT_PATH 		"/legato/systems/current/apps/wifiService/read-only/pa_wifi.sh "
- 
- //--------------------------------------------------------------------------------------------------
- /**
-  * Link to the dnsmasq related configuration file
-  */
- //--------------------------------------------------------------------------------------------------
--#define DNSMASQ_CFG_LINK "/etc/dnsmasq.d/dnsmasq.wlan.conf"
-+#define DNSMASQ_CFG_LINK 		"/etc/dnsmasq.d/dnsmasq.wlan.conf"
- //--------------------------------------------------------------------------------------------------
- /**
-  * dnsmasq related configuration file
-  */
- //--------------------------------------------------------------------------------------------------
--#define DNSMASQ_CFG_FILE "/tmp/dnsmasq.wlan.conf"
-+#define DNSMASQ_CFG_FILE 		"/tmp/dnsmasq.wlan.conf"
- 
- //--------------------------------------------------------------------------------------------------
- /**
-  * WiFi access point configuration file
-  */
- //--------------------------------------------------------------------------------------------------
--#define WIFI_HOSTAPD_FILE "/tmp/hostapd.conf"
-+#define WIFI_HOSTAPD_FILE 		"/tmp/hostapd.conf"
-+#define WIFI_WPA_SUPPLICANT_FILE 	"/tmp/wpa_supplicant"
+ #define WIFI_HOSTAPD_FILE "/tmp/hostapd.conf"
++#define WIFI_WPA_SUPPLICANT_FILE "/tmp/wpa_supplicant"
  
  // WiFi access point configuration.
  //--------------------------------------------------------------------------------------------------
-@@ -63,38 +66,50 @@
+@@ -63,38 +66,49 @@
   * Host access point global configuration.
   */
  //--------------------------------------------------------------------------------------------------
@@ -1338,22 +1286,21 @@ index 435b532..b32ac6f 100644
 -    "rts_threshold=2347\n"\
 -    "fragm_threshold=2346\n"\
 -    "ctrl_interface=/var/run/hostapd\n"\
-+#define WIFI_AP_CONFIG_HOSTAPD 			\
-+    "driver=nl80211\n"				\
-+    "hw_mode=g\n"				\
-+    "beacon_int=100\n"				\
-+    "dtim_period=2\n"				\
-+    "rts_threshold=2347\n"			\
-+    "fragm_threshold=2346\n"			\
-+    "ctrl_interface=/var/run/hostapd\n"		\
++#define WIFI_AP_CONFIG_HOSTAPD          \
++    "driver=nl80211\n"                  \
++    "hw_mode=g\n"                       \
++    "beacon_int=100\n"                  \
++    "dtim_period=2\n"                   \
++    "rts_threshold=2347\n"              \
++    "fragm_threshold=2346\n"            \
++    "ctrl_interface=/var/run/hostapd\n" \
      "ctrl_interface_group=0\n"
 +
-+#define WIFI_AP_CONFIG_WPA_SUPPLICANT 		\
-+    "ctrl_interface=/var/run/wpa_supplicant\n"	\
-+    "ctrl_interface_group=0\n"			\
-+    "network = {\n"				\
++#define WIFI_AP_CONFIG_WPA_SUPPLICANT          \
++    "ctrl_interface=/var/run/wpa_supplicant\n" \
++    "ctrl_interface_group=0\n"                 \
++    "network = {\n"                            \
 +    "\tmode=2\n"
-+    
 +
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1387,7 +1334,7 @@ index 435b532..b32ac6f 100644
  //--------------------------------------------------------------------------------------------------
  /**
   * Maximum numbers of WiFi connections for the TI chip
-@@ -104,12 +119,25 @@
+@@ -104,12 +118,25 @@
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1407,13 +1354,13 @@ index 435b532..b32ac6f 100644
 + * The current interface.
 + */
 +//--------------------------------------------------------------------------------------------------
-+static char 			    SavedWpaInterface[LE_WIFIDEFS_MAX_INTERFACE_BYTES];
++static char                         SavedWpaInterface[LE_WIFIDEFS_MAX_INTERFACE_BYTES];
 +//--------------------------------------------------------------------------------------------------
 +/**
   * The current SSID
   */
  //--------------------------------------------------------------------------------------------------
-@@ -228,20 +256,25 @@ static void *WifiApPaThreadMain
+@@ -228,20 +255,25 @@ static void *WifiApPaThreadMain
      void *contextPtr
  )
  {
@@ -1427,8 +1374,8 @@ index 435b532..b32ac6f 100644
 +    snprintf(tmpString,
 +             sizeof(tmpString),
 +             (WIFI_SCRIPT_PATH COMMAND_WIFI_SET_EVENT),
-+	     strnlen(interface, LE_WIFIDEFS_MAX_INTERFACE_BYTES),
-+	     interface);
++             strnlen(interface, LE_WIFIDEFS_MAX_INTERFACE_BYTES),
++             interface);
 +
      // Open the command "iw events" for reading.
      IwThreadPipePtr = popen(tmpString, "r");
@@ -1444,7 +1391,7 @@ index 435b532..b32ac6f 100644
          return NULL;
      }
  
-@@ -442,18 +475,22 @@ le_result_t pa_wifiAp_Release
+@@ -442,18 +474,22 @@ le_result_t pa_wifiAp_Release
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Start
  (
@@ -1470,21 +1417,21 @@ index 435b532..b32ac6f 100644
      le_thread_SetJoinable(WifiApPaThread);
      le_thread_AddDestructor(ThreadDestructor, NULL);
      le_thread_Start(WifiApPaThread);
-@@ -470,7 +507,12 @@ le_result_t pa_wifiAp_Start
+@@ -470,7 +506,12 @@ le_result_t pa_wifiAp_Start
  
      if (LE_OK == result)
      {
 -        systemResult = system(WIFI_SCRIPT_PATH COMMAND_WIFI_HW_START);
-+	snprintf(tmpString,
++        snprintf(tmpString,
 +                 sizeof(tmpString),
 +                 (WIFI_SCRIPT_PATH COMMAND_WIFI_HW_START),
-+		 interface);
++                 interface);
 +
 +        systemResult = system(tmpString);
          /**
           * Return value of -1 means that the fork() has failed (see man system).
           * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -478,14 +520,14 @@ le_result_t pa_wifiAp_Start
+@@ -478,14 +519,14 @@ le_result_t pa_wifiAp_Start
           * 127 if modules not loaded or interface not seen,
           * 1 if the option passed if unknown (start stop and restart).
          */
@@ -1502,15 +1449,15 @@ index 435b532..b32ac6f 100644
              result = LE_FAULT;
          }
      }
-@@ -493,15 +535,20 @@ le_result_t pa_wifiAp_Start
+@@ -493,15 +534,20 @@ le_result_t pa_wifiAp_Start
      if (LE_OK == result)
      {
          // COMMAND_WIFI_WLAN_UP
 -        systemResult = system(WIFI_SCRIPT_PATH COMMAND_WIFI_WLAN_UP);
-+	snprintf(tmpString,
++        snprintf(tmpString,
 +                 sizeof(tmpString),
 +                 (WIFI_SCRIPT_PATH COMMAND_WIFI_WLAN_UP),
-+		 interface);
++                 interface);
 +
 +        systemResult = system(tmpString);
          if (0 == WEXITSTATUS(systemResult))
@@ -1526,7 +1473,7 @@ index 435b532..b32ac6f 100644
              result = LE_FAULT;
          }
      }
-@@ -509,50 +556,66 @@ le_result_t pa_wifiAp_Start
+@@ -509,50 +555,75 @@ le_result_t pa_wifiAp_Start
      if (LE_OK == result)
      {
          // Create /etc/hostapd.conf
@@ -1536,7 +1483,7 @@ index 435b532..b32ac6f 100644
          {
 -            LE_ERROR("WiFi Access Point Command Failed: Unable to create hostapd.conf file.");
 +            LE_ERROR("WiFi Access Point Command Failed: Unable to create '%s' file.",
-+	        (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? WIFI_HOSTAPD_FILE:WIFI_WPA_SUPPLICANT_FILE);
++                     (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? WIFI_HOSTAPD_FILE:WIFI_WPA_SUPPLICANT_FILE);
              result = LE_FAULT;
          }
          else
@@ -1552,24 +1499,24 @@ index 435b532..b32ac6f 100644
 -                SavedChannelNumber,
 -                SavedMaxNumClients);
 -            result = WriteApCfgFile(tmpString, configFilePtr);
--        }
-+	    if (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211)
-+	    {
-+                snprintf(tmpString, sizeof(tmpString), "interface=%s\nssid=%s\nchannel=%d\nmax_num_sta=%d\n",
-+                    interface,
-+		    (char *)SavedSsid,
-+                    SavedChannelNumber,
-+                    SavedMaxNumClients);
++            if (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211)
++            {
++                snprintf(tmpString, sizeof(tmpString),
++                         "interface=%s\nssid=%s\nchannel=%d\nmax_num_sta=%d\n",
++                         interface,
++                         (char *)SavedSsid,
++                         SavedChannelNumber,
++                         SavedMaxNumClients);
 +                result = WriteApCfgFile(tmpString, configFilePtr);
 +            }
-+	    else
-+	    {
-+		snprintf(tmpString, sizeof(tmpString), "\tssid=%s\n\tchannel=%d\n",
-+		    (char *)SavedSsid,
-+                    SavedChannelNumber);
++            else
++            {
++                snprintf(tmpString, sizeof(tmpString), "\tssid=%s\n\tchannel=%d\n",
++                         (char *)SavedSsid,
++                         SavedChannelNumber);
 +                result = WriteApCfgFile(tmpString, configFilePtr);
-+	    }
-+	}
++            }
+         }
  
          if (result == LE_OK)
          {
@@ -1581,21 +1528,28 @@ index 435b532..b32ac6f 100644
                  case LE_WIFIAP_SECURITY_NONE:
                      LE_INFO("LE_WIFIAP_SECURITY_NONE");
 -                    result = WriteApCfgFile(WIFI_AP_CONFIG_SECURITY_NONE, configFilePtr);
-+                    result = WriteApCfgFile((SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? 
-+		        WIFI_AP_CONFIG_HOSTAPD_SECURITY_NONE:WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_NONE, configFilePtr);
++                    result = WriteApCfgFile(
++                        (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++                        WIFI_AP_CONFIG_HOSTAPD_SECURITY_NONE :
++                        WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_NONE,
++                        configFilePtr);
                      break;
  
                  case LE_WIFIAP_SECURITY_WPA2:
                      LE_INFO("LE_WIFIAP_SECURITY_WPA2");
 -                    result = WriteApCfgFile(WIFI_AP_CONFIG_SECURITY_WPA2, configFilePtr);
-+                    result = WriteApCfgFile((SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? 
-+		        WIFI_AP_CONFIG_HOSTAPD_SECURITY_WPA2:WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_WPA2, configFilePtr);
++                    result = WriteApCfgFile(
++                        (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++                        WIFI_AP_CONFIG_HOSTAPD_SECURITY_WPA2 :
++                        WIFI_AP_CONFIG_WPA_SUPPLICANT_SECURITY_WPA2,
++                        configFilePtr);
                      if ('\0' != SavedPassphrase[0])
                      {
 -                        snprintf(tmpString, sizeof(tmpString), "wpa_passphrase=%s\n", SavedPassphrase);
 -                        LE_INFO("hostapd.conf: %s", tmpString);
-+                        snprintf(tmpString, sizeof(tmpString), 
-+			    (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? "wpa_passphrase=%s\n":"\tpassphrase=%s\n", SavedPassphrase);
++                        snprintf(tmpString, sizeof(tmpString),
++                                 (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++                                 "wpa_passphrase=%s\n" : "\tpassphrase=%s\n", SavedPassphrase);
 +                        LE_INFO("AP configuration: %s", tmpString);
                          result = WriteApCfgFile(tmpString, configFilePtr);
                      }
@@ -1603,32 +1557,24 @@ index 435b532..b32ac6f 100644
                      {
 -                        snprintf(tmpString, sizeof(tmpString), "wpa_psk=%s\n", SavedPreSharedKey);
 -                        LE_INFO("hostapd.conf: %s", tmpString);
-+                        snprintf(tmpString, sizeof(tmpString), 
-+			    (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? "wpa_psk=%s\n":"psk=%s\n", SavedPreSharedKey);
++                        snprintf(tmpString, sizeof(tmpString),
++                                 (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++                                 "wpa_psk=%s\n" : "psk=%s\n", SavedPreSharedKey);
 +                        LE_INFO("AP configuration: %s", tmpString);
                          result = WriteApCfgFile(tmpString, configFilePtr);
                      }
                      else
-@@ -571,20 +634,28 @@ le_result_t pa_wifiAp_Start
+@@ -571,18 +642,26 @@ le_result_t pa_wifiAp_Start
  
      if (LE_OK == result)
      {
 -        if (true == SavedDiscoverable)
--        {
++        if (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211)
+         {
 -            // Announce SSID
 -            snprintf(tmpString, sizeof(tmpString), "ignore_broadcast_ssid=0\n");
 -            LE_INFO("hostapd.conf: %s", tmpString);
 -            result = WriteApCfgFile(tmpString, configFilePtr);
--        }
--        else
--        {
--            // Do not announce SSID
--            snprintf(tmpString, sizeof(tmpString), "ignore_broadcast_ssid=1\n");
--            LE_INFO("hostapd.conf: %s", tmpString);
--            result = WriteApCfgFile(tmpString, configFilePtr);
--        }
-+	if (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) 
-+	{
 +            if (true == SavedDiscoverable)
 +            {
 +                // Announce SSID
@@ -1643,16 +1589,17 @@ index 435b532..b32ac6f 100644
 +                LE_INFO("hostapd.conf: %s", tmpString);
 +                result = WriteApCfgFile(tmpString, configFilePtr);
 +            }
-+	}
-+	else
-+	{
-+	    snprintf(tmpString, sizeof(tmpString), "}\n");
-+	    result = WriteApCfgFile(tmpString, configFilePtr);
-+	}
+         }
+         else
+         {
+-            // Do not announce SSID
+-            snprintf(tmpString, sizeof(tmpString), "ignore_broadcast_ssid=1\n");
+-            LE_INFO("hostapd.conf: %s", tmpString);
++            snprintf(tmpString, sizeof(tmpString), "}\n");
+             result = WriteApCfgFile(tmpString, configFilePtr);
+         }
      }
- 
-     // Close file
-@@ -595,28 +666,42 @@ le_result_t pa_wifiAp_Start
+@@ -595,28 +674,44 @@ le_result_t pa_wifiAp_Start
      {
          LE_INFO("Waiting 15s for WiFi driver availability ...");
          sleep(15);   // Sleep 15s
@@ -1660,7 +1607,7 @@ index 435b532..b32ac6f 100644
 -        if (LE_OK == result)
 +
 +        // Start Access Point
-+	LE_INFO("Start Access Point");
++        LE_INFO("Start Access Point");
 +        if (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211)
          {
 -            LE_INFO("Start Access Point Cmd: /bin/hostapd /tmp/hostapd.conf");
@@ -1675,18 +1622,18 @@ index 435b532..b32ac6f 100644
 -                LE_INFO("WiFi Access Point Command OK:" COMMAND_WIFIAP_HOSTAPD_START);
 -                result = LE_OK;
 -            }
-+	    snprintf(tmpString,
++            snprintf(tmpString,
 +                     sizeof(tmpString),
 +                     (WIFI_SCRIPT_PATH COMMAND_WIFIAP_HOSTAPD_START),
-+		     interface);
-+	}
-+	else
-+	{
-+	    snprintf(tmpString,
++                     interface);
++        }
++        else
++        {
++            snprintf(tmpString,
 +                     sizeof(tmpString),
 +                     (WIFI_SCRIPT_PATH COMMAND_WIFIAP_WPA_SUPPLICANT_START),
-+		     interface);
-+	}
++                     interface);
++        }
 +
 +        systemResult = system(tmpString);
 +        if (0 != WEXITSTATUS(systemResult))
@@ -1705,13 +1652,15 @@ index 435b532..b32ac6f 100644
          // Config file is incomplete, so it is removed.
 -        LE_ERROR("WiFi Client Command Failed: As a result, configuration file (%s) is removed.", WIFI_HOSTAPD_FILE);
 -        remove(WIFI_HOSTAPD_FILE);
-+        LE_ERROR("WiFi Client Command Failed: As a result, configuration file (%s) is removed.", 
-+	    (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? WIFI_HOSTAPD_FILE : WIFI_WPA_SUPPLICANT_FILE);
-+        remove((SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ? WIFI_HOSTAPD_FILE : WIFI_WPA_SUPPLICANT_FILE);
++        LE_ERROR("WiFi Client Command Failed: As a result, configuration file (%s) is removed.",
++                 (SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++                 WIFI_HOSTAPD_FILE : WIFI_WPA_SUPPLICANT_FILE);
++        remove((SavedWpaDriver == LE_WIFIAP_DRIVER_NL80211) ?
++               WIFI_HOSTAPD_FILE : WIFI_WPA_SUPPLICANT_FILE);
      }
  
      return result;
-@@ -633,34 +718,61 @@ le_result_t pa_wifiAp_Start
+@@ -633,34 +728,61 @@ le_result_t pa_wifiAp_Start
  //--------------------------------------------------------------------------------------------------
  le_result_t pa_wifiAp_Stop
  (
@@ -1774,13 +1723,13 @@ index 435b532..b32ac6f 100644
 +    snprintf(tmpString,
 +             sizeof(tmpString),
 +             (WIFI_SCRIPT_PATH COMMAND_WIFI_HW_STOP),
-+	     interface ? interface : SavedWpaInterface);
++             interface ? interface : SavedWpaInterface);
 +
 +    systemResult = system(tmpString);
      /**
       * Return value of -1 means that the fork() has failed (see man system).
       * The script /etc/init.d/tiwifi returns 0 if the kernel modules are loaded correctly
-@@ -671,12 +783,12 @@ le_result_t pa_wifiAp_Stop
+@@ -671,12 +793,12 @@ le_result_t pa_wifiAp_Stop
      */
      if (0 == WEXITSTATUS(systemResult))
      {
@@ -1795,7 +1744,7 @@ index 435b532..b32ac6f 100644
          result = LE_FAULT;
      }
  
-@@ -778,6 +890,39 @@ le_result_t pa_wifiAp_SetSsid
+@@ -778,6 +900,39 @@ le_result_t pa_wifiAp_SetSsid
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -1835,7 +1784,7 @@ index 435b532..b32ac6f 100644
   * Set the security protocol used to communicate.
   *
   * @note WEP is not supported as it is unsecure and has been deprecated in favor of WPA/WPA2.
-@@ -999,9 +1144,12 @@ le_result_t pa_wifiAp_SetIpRange
+@@ -999,9 +1154,12 @@ le_result_t pa_wifiAp_SetIpRange
      const char *ipStartPtr,
          ///< [IN]
          ///< the start IP address of the Access Point.
@@ -1849,24 +1798,24 @@ index 435b532..b32ac6f 100644
  )
  {
      struct sockaddr_in  saApPtr;
-@@ -1065,7 +1213,8 @@ le_result_t pa_wifiAp_SetIpRange
+@@ -1065,7 +1223,8 @@ le_result_t pa_wifiAp_SetIpRange
          char cmd[256];
          int  systemResult;
  
 -        snprintf((char *)&cmd, sizeof(cmd), "%s %s %s %s", "/sbin/ifconfig", "wlan0", ipApPtr, "up");
-+        snprintf((char *)&cmd, sizeof(cmd), "%s %s %s %s", 
++        snprintf((char *)&cmd, sizeof(cmd), "%s %s %s %s",
 +            "/sbin/ifconfig", interface ? interface : SavedWpaInterface, ipApPtr, "up");
  
          systemResult = system(cmd);
          if (0 != WEXITSTATUS (systemResult))
-@@ -1087,9 +1236,12 @@ le_result_t pa_wifiAp_SetIpRange
+@@ -1087,9 +1246,12 @@ le_result_t pa_wifiAp_SetIpRange
              filePtr = fopen (DNSMASQ_CFG_FILE, "w");
              if (filePtr != NULL)
              {
 -                fprintf(filePtr, "dhcp-range=%s, %s,%s,%dh\n", "wlan0", ipStartPtr, ipStopPtr, 24);
 -                fprintf(filePtr, "dhcp-option=%s, %d,%s\n","wlan0", 3, ipApPtr);
 -                fprintf(filePtr, "dhcp-option=%s, %d,%s\n","wlan0", 6, ipApPtr);
-+                fprintf(filePtr, "dhcp-range=%s, %s,%s,%dh\n", 
++                fprintf(filePtr, "dhcp-range=%s, %s,%s,%dh\n",
 +                    interface ? interface : SavedWpaInterface, ipStartPtr, ipStopPtr, 24);
 +                fprintf(filePtr, "dhcp-option=%s, %d,%s\n",
 +                    interface ? interface : SavedWpaInterface, 3, ipApPtr);
@@ -1875,7 +1824,7 @@ index 435b532..b32ac6f 100644
                  fclose(filePtr);
              }
              else
-@@ -1100,8 +1252,11 @@ le_result_t pa_wifiAp_SetIpRange
+@@ -1100,8 +1262,11 @@ le_result_t pa_wifiAp_SetIpRange
  
              LE_INFO("@AP=%s, @APstart=%s, @APstop=%s", ipApPtr, ipStartPtr, ipStopPtr);
  
