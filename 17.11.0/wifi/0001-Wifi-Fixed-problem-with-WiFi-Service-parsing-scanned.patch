@@ -1,0 +1,28 @@
+From 34707e87dafed524103d8c15d53764ddeb8bdcf8 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Tue, 16 Jan 2018 12:13:19 -0800
+Subject: [PATCH 1/4] [Wifi] Fixed problem with WiFi Service parsing scanned
+ SSIDs > 25 bytes
+
+Resolves: LE-9179
+Change-Id: I3da92de2106d548c2268687268f0b7ce88d0e836
+---
+ service/platformAdaptor/ti/pa_wifi_client_ti.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/service/platformAdaptor/ti/pa_wifi_client_ti.c b/service/platformAdaptor/ti/pa_wifi_client_ti.c
+index bc19b3e..003afae 100644
+--- a/service/platformAdaptor/ti/pa_wifi_client_ti.c
++++ b/service/platformAdaptor/ti/pa_wifi_client_ti.c
+@@ -505,7 +505,7 @@ le_result_t pa_wifiClient_GetScanResult
+ 
+         if (0 == strncmp("\tSSID: ", path, 7))
+         {
+-            accessPointPtr->ssidLength = strnlen(path, LE_WIFIDEFS_MAX_SSID_BYTES) - 7 - 1;
++            accessPointPtr->ssidLength = strnlen(path, LE_WIFIDEFS_MAX_SSID_BYTES + 7) - 7 - 1;
+             LE_INFO("FOUND SSID:%s  %c%c.. ", path, path[7], path[8]);
+             memset(&accessPointPtr->ssidBytes, 0, LE_WIFIDEFS_MAX_SSID_BYTES);
+             memcpy (&accessPointPtr->ssidBytes, &path[7], accessPointPtr->ssidLength);
+-- 
+2.11.0
+

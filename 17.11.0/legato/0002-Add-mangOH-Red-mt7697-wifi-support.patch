@@ -1,0 +1,679 @@
+From a5820ee1adab3e62d0330dc0ea51d5211e7e796b Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Fri, 3 Nov 2017 10:16:34 -0700
+Subject: [PATCH 2/2] Add mangOH Red mt7697 wifi support
+
+The data connection service and wifi client/AP have been updated to support the
+mt7697 WiFi on the mangOH Red.
+
+Resolves: LE-8890
+Change-Id: I5c712b2614e23c914225449507210eb093b392c3
+Signed-off-by: David Clark <dclark@sierrawireless.com>
+---
+ .../dataConnectionUnitTest/interfaces.h            |   8 +-
+ .../dataConnectionUnitTest/main.c                  |   2 +
+ .../dataConnectionService/dcsDaemon/dcsServer.c    | 211 +++++++++++++++------
+ interfaces/wifi/le_wifiAp.api                      |  67 ++++++-
+ interfaces/wifi/le_wifiClient.api                  |  65 ++++++-
+ interfaces/wifi/le_wifiDefs.api                    |  23 +++
+ 6 files changed, 312 insertions(+), 64 deletions(-)
+
+diff --git a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
+index 262ca3114..2b3bc0892 100644
+--- a/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
++++ b/apps/test/dataConnectionService/dataConnectionUnitTest/interfaces.h
+@@ -32,9 +32,11 @@
+  * Simulated wifi config tree
+  */
+ //--------------------------------------------------------------------------------------------------
+-#define CFG_NODE_SSID               "SSID"
+-#define CFG_NODE_SECPROTOCOL        "secProtocol"
+-#define CFG_NODE_PASSPHRASE         "passphrase"
++#define CFG_NODE_SSID                  "SSID"
++#define CFG_NODE_INTERFACE             "Interface"
++#define CFG_NODE_WPA_SUPPLICANT_DRIVER "WpaSupplicantDriver"
++#define CFG_NODE_SECPROTOCOL           "secProtocol"
++#define CFG_NODE_PASSPHRASE            "passphrase"
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+diff --git a/apps/test/dataConnectionService/dataConnectionUnitTest/main.c b/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
+index 270b8a4e0..dfdc3a41e 100644
+--- a/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
++++ b/apps/test/dataConnectionService/dataConnectionUnitTest/main.c
+@@ -500,6 +500,8 @@ static void Testle_data_Service
+     le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_SSID, "TestSSID");
+     le_cfgTest_SetIntNodeValue(wifiTestIteratorRef, CFG_NODE_SECPROTOCOL, 3);
+     le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_PASSPHRASE, "pa$$w0rd");
++    le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_INTERFACE, "wlan0");
++    le_cfgTest_SetStringNodeValue(wifiTestIteratorRef, CFG_NODE_WPA_SUPPLICANT_DRIVER, "nl802111");
+ 
+     LE_INFO("Simulate cellular disconnection");
+ 
+diff --git a/components/dataConnectionService/dcsDaemon/dcsServer.c b/components/dataConnectionService/dcsDaemon/dcsServer.c
+index 1edad3b73..d5f0e8bab 100644
+--- a/components/dataConnectionService/dcsDaemon/dcsServer.c
++++ b/components/dataConnectionService/dcsDaemon/dcsServer.c
+@@ -50,18 +50,20 @@
+  * The config tree path and node definitions.
+  */
+ //--------------------------------------------------------------------------------------------------
+-#define DCS_CONFIG_TREE_ROOT_DIR    "dataConnectionService:"
+-#define CFG_PATH_ROUTING            "routing"
+-#define CFG_NODE_DEFAULTROUTE       "useDefaultRoute"
+-#define CFG_PATH_WIFI               "wifi"
+-#define CFG_NODE_SSID               "SSID"
+-#define CFG_NODE_SECPROTOCOL        "secProtocol"
+-#define CFG_NODE_PASSPHRASE         "passphrase"
+-#define CFG_PATH_CELLULAR           "cellular"
+-#define CFG_NODE_PROFILEINDEX       "profileIndex"
+-#define CFG_PATH_TIME               "time"
+-#define CFG_NODE_PROTOCOL           "protocol"
+-#define CFG_NODE_SERVER             "server"
++#define DCS_CONFIG_TREE_ROOT_DIR            "dataConnectionService:"
++#define CFG_PATH_ROUTING            		"routing"
++#define CFG_NODE_DEFAULTROUTE       		"useDefaultRoute"
++#define CFG_PATH_WIFI               		"wifi"
++#define CFG_WIFI_NODE_SSID               	"SSID"
++#define CFG_WIFI_NODE_INTERFACE	    		"interface"
++#define CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER	"wpaSupplicantDriver"
++#define CFG_WIFI_NODE_SECPROTOCOL        	"secProtocol"
++#define CFG_WIFI_NODE_PASSPHRASE         	"passphrase"
++#define CFG_PATH_CELLULAR           		"cellular"
++#define CFG_CELL_NODE_PROFILEINDEX       	"profileIndex"
++#define CFG_PATH_TIME                       "time"
++#define CFG_NODE_PROTOCOL                   "protocol"
++#define CFG_NODE_SERVER                     "server"
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+@@ -88,14 +90,6 @@
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+- * Wifi interface name
+- * TODO: Should be retrieved from Wi-Fi client. To modify when API is available.
+- */
+-//--------------------------------------------------------------------------------------------------
+-#define WIFI_INTF "wlan0"
+-
+-//--------------------------------------------------------------------------------------------------
+-/**
+  * Maximal number of retries to stop the data session
+  */
+ //--------------------------------------------------------------------------------------------------
+@@ -236,6 +230,20 @@ static le_wifiClient_NewEventHandlerRef_t WifiEventHandlerRef = NULL;
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * WiFi WPA Supplicant Driver used for the wifi connection
++ */
++//--------------------------------------------------------------------------------------------------
++static char WpaSupplicantDriver[LE_WIFIDEFS_MAX_WPA_SUPPLICANT_DRIVER_BYTES] = {0};
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * WiFi Interface of the Access Point used for the wifi connection
++ */
++//--------------------------------------------------------------------------------------------------
++static char WiFiInterface[LE_WIFIDEFS_MAX_INTERFACE_BYTES] = {0};
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * SSID of the Access Point used for the wifi connection
+  */
+ //--------------------------------------------------------------------------------------------------
+@@ -507,7 +515,7 @@ static void SendConnStateEvent
+             break;
+ 
+         case LE_DATA_WIFI:
+-            snprintf(eventData.interfaceName, sizeof(eventData.interfaceName), WIFI_INTF);
++            strncpy(eventData.interfaceName, WiFiInterface, sizeof(eventData.interfaceName));
+             break;
+ 
+         default:
+@@ -516,7 +524,7 @@ static void SendConnStateEvent
+             break;
+     }
+ 
+-    LE_DEBUG("Reporting '%s' state[%i]",
++    LE_DEBUG("Reporting interface('%s') state(%i)",
+         eventData.interfaceName,
+         eventData.isConnected);
+ 
+@@ -596,13 +604,17 @@ static void WifiClientEventHandler
+             // and update connection status
+             if ((LE_DATA_WIFI == CurrentTech) && (RequestCount > 0))
+             {
+-                if (LE_OK == pa_dcs_AskForIpAddress(WIFI_INTF))
+-                {
+-                    IsConnected = true;
+-                }
+-                else
++                if (LE_OK == le_wifiClient_GetInterface(AccessPointRef, WiFiInterface,
++                                                        sizeof(WiFiInterface)))
+                 {
+-                    IsConnected = false;
++                    if (LE_OK == pa_dcs_AskForIpAddress(WiFiInterface))
++                    {
++                        IsConnected = true;
++                    }
++                    else
++                    {
++                        IsConnected = false;
++                    }
+                 }
+             }
+             else
+@@ -629,7 +641,22 @@ static void WifiClientEventHandler
+             break;
+ 
+         case LE_WIFICLIENT_EVENT_SCAN_DONE:
+-            LE_DEBUG("Wifi client: scan done");
++            LE_INFO("Wifi client: scan done");
++
++            // Connect to the Access Point
++            le_result_t result = le_wifiClient_Connect(AccessPointRef);
++            if (LE_OK != result)
++            {
++                LE_ERROR("Impossible to connect to AP, result %d (%s)", result, LE_RESULT_TXT(result));
++
++                // Impossible to use this technology, try the next one
++                ConnectionStatusHandler(LE_DATA_WIFI, false);
++            }
++            else
++            {
++                LE_INFO("Connecting to AP");
++            }
++
+             break;
+ 
+         default:
+@@ -712,9 +739,9 @@ static int32_t GetDataProfileIndex
+     le_cfg_IteratorRef_t cfg = le_cfg_CreateReadTxn(configPath);
+ 
+     // Get Cid Profile
+-    if (le_cfg_NodeExists(cfg, CFG_NODE_PROFILEINDEX))
++    if (le_cfg_NodeExists(cfg, CFG_CELL_NODE_PROFILEINDEX))
+     {
+-        index = le_cfg_GetInt(cfg, CFG_NODE_PROFILEINDEX, LE_MDC_DEFAULT_PROFILE);
++        index = le_cfg_GetInt(cfg, CFG_CELL_NODE_PROFILEINDEX, LE_MDC_DEFAULT_PROFILE);
+         LE_DEBUG("Use data profile index %d", index);
+     }
+     le_cfg_CancelTxn(cfg);
+@@ -761,7 +788,7 @@ static void SetDataProfileIndex
+ 
+     le_cfg_IteratorRef_t cfg = le_cfg_CreateWriteTxn(configPath);
+     // Set Cid Profile
+-    le_cfg_SetInt(cfg, CFG_NODE_PROFILEINDEX, profileIndex);
++    le_cfg_SetInt(cfg, CFG_CELL_NODE_PROFILEINDEX, profileIndex);
+     le_cfg_CommitTxn(cfg);
+ }
+ 
+@@ -940,53 +967,94 @@ static le_result_t LoadSelectedTechProfile
+             le_cfg_IteratorRef_t cfg = le_cfg_CreateReadTxn(configPath);
+ 
+             // SSID
+-            if (le_cfg_NodeExists(cfg, CFG_NODE_SSID))
++            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_SSID))
++            {
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_SSID, Ssid, sizeof(Ssid),
++                                              "testSsid"))
++                {
++                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_SSID);
++                    le_cfg_CancelTxn(cfg);
++                    return LE_OVERFLOW;
++                }
++                LE_INFO("AP configuration, SSID: '%s'", Ssid);
++            }
++            else
++            {
++                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_SSID);
++                le_cfg_CancelTxn(cfg);
++                return LE_NOT_FOUND;
++            }
++
++            // WiFi Interface
++            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_INTERFACE))
++            {
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_INTERFACE, WiFiInterface,
++                                              sizeof(WiFiInterface), "testInterface"))
++                {
++                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_INTERFACE);
++                    le_cfg_CancelTxn(cfg);
++                    return LE_OVERFLOW;
++                }
++                LE_INFO("AP configuration, interface: '%s'", WiFiInterface);
++            }
++            else
++            {
++                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_INTERFACE);
++                le_cfg_CancelTxn(cfg);
++                return LE_NOT_FOUND;
++            }
++
++            // Wpa Supplicant Driver
++            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER))
+             {
+-                if (LE_OK != le_cfg_GetString(cfg, CFG_NODE_SSID, Ssid, sizeof(Ssid), "testSsid"))
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER,
++                                              WpaSupplicantDriver, sizeof(WpaSupplicantDriver),
++                                              "testWpaSupplicantDriver"))
+                 {
+-                    LE_WARN("String value for '%s' too large", CFG_NODE_SSID);
++                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER);
+                     le_cfg_CancelTxn(cfg);
+                     return LE_OVERFLOW;
+                 }
+-                LE_DEBUG("AP configuration, SSID: '%s'", Ssid);
++                LE_INFO("AP configuration, WPA Supplicant driver: '%s'", WpaSupplicantDriver);
+             }
+             else
+             {
+-                LE_WARN("No value set for '%s'!", CFG_NODE_SSID);
++                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_WPA_SUPPLICANT_DRIVER);
+                 le_cfg_CancelTxn(cfg);
+                 return LE_NOT_FOUND;
+             }
+ 
+             // Security protocol
+-            if (le_cfg_NodeExists(cfg, CFG_NODE_SECPROTOCOL))
++            if (le_cfg_NodeExists(cfg, CFG_WIFI_NODE_SECPROTOCOL))
+             {
+-                SecProtocol = le_cfg_GetInt(cfg, CFG_NODE_SECPROTOCOL,
++                SecProtocol = le_cfg_GetInt(cfg, CFG_WIFI_NODE_SECPROTOCOL,
+                                             LE_WIFICLIENT_SECURITY_WPA2_PSK_PERSONAL);
+-                LE_DEBUG("AP configuration, Security protocol: %d", SecProtocol);
++                LE_INFO("AP configuration, Security protocol: %d", SecProtocol);
+             }
+             else
+             {
+-                LE_WARN("No value set for '%s'!", CFG_NODE_SECPROTOCOL);
++                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_SECPROTOCOL);
+                 le_cfg_CancelTxn(cfg);
+                 return LE_NOT_FOUND;
+             }
+ 
+             // Passphrase
+             // TODO: passphrase should not be stored without ciphering in the config tree
+-            if (le_cfg_NodeExists(cfg, CFG_NODE_PASSPHRASE))
++            if ((SecProtocol != LE_WIFICLIENT_SECURITY_NONE) &&
++                le_cfg_NodeExists(cfg, CFG_WIFI_NODE_PASSPHRASE))
+             {
+-                if (LE_OK != le_cfg_GetString(cfg, CFG_NODE_PASSPHRASE, Passphrase,
++                if (LE_OK != le_cfg_GetString(cfg, CFG_WIFI_NODE_PASSPHRASE, Passphrase,
+                                               sizeof(Passphrase), "passphrase"))
+                 {
+-                    LE_WARN("String value for '%s' too large", CFG_NODE_PASSPHRASE);
++                    LE_WARN("String value for '%s' too large", CFG_WIFI_NODE_PASSPHRASE);
+                     le_cfg_CancelTxn(cfg);
+                     return LE_OVERFLOW;
+                 }
+-                LE_DEBUG("AP configuration, Passphrase: '%s'", Passphrase);
++                LE_INFO("AP configuration, Passphrase: '%s'", Passphrase);
+             }
+-            else
++            else if (SecProtocol != LE_WIFICLIENT_SECURITY_NONE)
+             {
+-                LE_WARN("No value set for '%s'!", CFG_NODE_PASSPHRASE);
++                LE_WARN("No value set for '%s'!", CFG_WIFI_NODE_PASSPHRASE);
+                 le_cfg_CancelTxn(cfg);
+                 return LE_NOT_FOUND;
+             }
+@@ -999,8 +1067,36 @@ static le_result_t LoadSelectedTechProfile
+             if (NULL != AccessPointRef)
+             {
+                 // Configure the Access Point
+-                LE_ASSERT(LE_OK == le_wifiClient_SetSecurityProtocol(AccessPointRef, SecProtocol));
+-                LE_ASSERT(LE_OK == le_wifiClient_SetPassphrase(AccessPointRef, Passphrase));
++                result = le_wifiClient_SetInterface(AccessPointRef, WiFiInterface);
++                if (result != LE_OK)
++                {
++                    LE_ERROR("le_wifiClient_SetInterface() failed(%d)", result);
++                    return result;
++                }
++
++                result = le_wifiClient_SetSecurityProtocol(AccessPointRef, SecProtocol);
++                if (result != LE_OK)
++                {
++                    LE_ERROR("le_wifiClient_SetSecurityProtocol() failed(%d)", result);
++                    return result;
++                }
++
++                if (SecProtocol != LE_WIFICLIENT_SECURITY_NONE) {
++                    result = le_wifiClient_SetPassphrase(AccessPointRef, Passphrase);
++                    if (result != LE_OK)
++                    {
++                        LE_ERROR("le_wifiClient_SetPassphrase() failed(%d)", result);
++                        return result;
++                    }
++                }
++
++                result = le_wifiClient_SetWpaSupplicantDriver(AccessPointRef,
++                                                              WpaSupplicantDriver);
++                if (result != LE_OK)
++                {
++                    LE_ERROR("le_wifiClient_SetWpaSupplicantDriver() failed(%d)", result);
++                    return result;
++                }
+ 
+                 // Register for Wifi Client state changes if not already done
+                 if (NULL == WifiEventHandlerRef)
+@@ -1016,6 +1112,8 @@ static le_result_t LoadSelectedTechProfile
+             }
+ 
+             // Delete sensitive information
++            memset(WpaSupplicantDriver, '\0', sizeof(WpaSupplicantDriver));
++            memset(WiFiInterface, '\0', sizeof(WiFiInterface));
+             memset(Ssid, '\0', sizeof(Ssid));
+             memset(Passphrase, '\0', sizeof(Passphrase));
+         }
+@@ -1354,19 +1452,17 @@ static void TryStartWifiSession
+         return;
+     }
+ 
+-    // Connect to the Access Point
+-    result = le_wifiClient_Connect(AccessPointRef);
++    LE_DEBUG("Scan for AP");
++    result = le_wifiClient_Scan();
+     if (LE_OK != result)
+     {
+-        LE_ERROR("Impossible to connect to AP, result %d (%s)", result, LE_RESULT_TXT(result));
++        LE_ERROR("Impossible to scan for AP, result %d (%s)", result, LE_RESULT_TXT(result));
+ 
+         // Impossible to use this technology, try the next one
+         ConnectionStatusHandler(LE_DATA_WIFI, false);
+ 
+         return;
+     }
+-
+-    LE_INFO("Connecting to AP");
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -1441,6 +1537,8 @@ static void TryStopDataSession
+     le_mdc_ConState_t sessionState;
+     le_result_t result;
+ 
++    LE_DEBUG("Stop Data session");
++
+     // Check if the mobile data session is already disconnected
+     result = le_mdc_GetSessionState(MobileProfileRef, &sessionState);
+     if ((LE_OK == result) && (!sessionState))
+@@ -1500,7 +1598,9 @@ static void TryStopWifiSession
+     le_timer_Ref_t timerRef     ///< [IN] Timer used to ensure the end of the session
+ )
+ {
+-    if (LE_OK != le_wifiClient_Disconnect())
++    LE_DEBUG("Stop WiFi session");
++
++    if (LE_OK != le_wifiClient_Disconnect(AccessPointRef))
+     {
+         LE_ERROR("Impossible to disconnect wifi client");
+ 
+@@ -1538,6 +1638,7 @@ static void TryStopTechSession
+     }
+     else
+     {
++        LE_DEBUG("Stop technology %d", technology);
+         switch (technology)
+         {
+             case LE_DATA_CELLULAR:
+diff --git a/interfaces/wifi/le_wifiAp.api b/interfaces/wifi/le_wifiAp.api
+index ebdee1a3c..a9402d196 100644
+--- a/interfaces/wifi/le_wifiAp.api
++++ b/interfaces/wifi/le_wifiAp.api
+@@ -102,6 +102,16 @@ ENUM SecurityProtocol
+     SECURITY_WPA2    ///< WiFi Access Point has WPA2 activated.
+ };
+ 
++//--------------------------------------------------------------------------------------------------
++/**
++ * Wpa Supplicant Driver options.
++ */
++//--------------------------------------------------------------------------------------------------
++ENUM WpaDriver
++{
++    DRIVER_NL80211,     ///< WiFi WPA Supplicant nl80211 driver
++    DRIVER_WEXT,        ///< WiFi WPA Supplicant wext driver
++};
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+@@ -124,9 +134,10 @@ EVENT NewEvent
+     EventHandler handler
+ );
+ 
+-
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * @deprecated - callers should now use StartInterface instead.
++ *
+  * This function starts the WIFI Access Point.
+  * @note that all settings, if to be used, such as security, username, password must set prior to
+  * starting the Access Point.
+@@ -143,6 +154,25 @@ FUNCTION le_result_t Start
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * This function starts the WIFI Access Point.
++ * @note that all settings, if to be used, such as security, username, password must set prior to
++ * starting the Access Point.
++ *
++ * @return
++ *      - LE_FAULT if the function failed.
++ *      - LE_OK if the function succeeded.
++ *
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t StartInterface
++(
++    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface to set as a octet array.
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * @deprecated - callers should now use StopInterface instead.
++ *
+  * This function stops the WIFI Access Point.
+  *
+  * @return
+@@ -157,6 +187,21 @@ FUNCTION le_result_t Stop
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * This function stops the WIFI Access Point.
++ *
++ * @return
++ *      - LE_FAULT if the function failed.
++ *      - LE_OK if the function succeeded.
++ *
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t StopInterface
++(
++    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface to set as a octet array.
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the Service set identification (SSID) of the AccessPoint
+  * Default value is "LEGATO Access Point"
+  * @note that the SSID does not have to be human readable ASCII values, but often has.
+@@ -173,9 +218,23 @@ FUNCTION le_result_t SetSsid
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Set the WPA Supplicant driver to use.
++ * Default value is 0 - nl80211.
++ *
++ * @return
++ *      - LE_BAD_PARAMETER if some parameter is invalid.
++ *      - LE_OK if the function succeeded.
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t SetWpaSupplicantDriver
++(
++    WpaDriver wpaDriver IN ///< The WPA Supplicant driver to use.
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the Security protocol to use.
+  * Default value is SECURITY_WPA2.
+- * @note that the SSID does not have to be human readable ASCII values, but often has.
+  *
+  * @return
+  *      - LE_BAD_PARAMETER if some parameter is invalid.
+@@ -189,7 +248,6 @@ FUNCTION le_result_t SetSecurityProtocol
+ 
+ 
+ 
+-
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Set the passphrase used to generate the PSK.
+@@ -287,5 +345,6 @@ FUNCTION le_result_t SetIpRange
+ (
+     string ipAp[le_wifiDefs.MAX_IP_LENGTH] IN, ///< the IP address of the Access Point.
+     string ipStart[le_wifiDefs.MAX_IP_LENGTH] IN, ///< the start IP address of the Access Point.
+-    string ipStop[le_wifiDefs.MAX_IP_LENGTH] IN ///< the stop IP address of the Access Point.
++    string ipStop[le_wifiDefs.MAX_IP_LENGTH] IN, ///< the stop IP address of the Access Point.
++    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface of the Access Point.
+ );
+diff --git a/interfaces/wifi/le_wifiClient.api b/interfaces/wifi/le_wifiClient.api
+index 4bcfafa5a..3e3115d22 100644
+--- a/interfaces/wifi/le_wifiClient.api
++++ b/interfaces/wifi/le_wifiClient.api
+@@ -197,6 +197,17 @@ REFERENCE AccessPoint;
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * WiFi Client WPA Supplicant Driver.
++ */
++//--------------------------------------------------------------------------------------------------
++ENUM WpaDriver
++{
++    DRIVER_NL80211,     ///< WiFi WPA Supplicant nl80211 driver
++    DRIVER_WEXT,        ///< WiFi WPA Supplicant wext driver
++};
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * WiFi Client Events.
+  */
+ //--------------------------------------------------------------------------------------------------
+@@ -223,7 +234,6 @@ ENUM SecurityProtocol
+ };
+ 
+ 
+-
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Handler for WiFi Client changes
+@@ -370,7 +380,23 @@ FUNCTION le_result_t GetSsid
+     uint8 ssid[le_wifiDefs.MAX_SSID_BYTES] OUT ///< The SSID returned as a octet array.
+ );
+ 
+-
++//--------------------------------------------------------------------------------------------------
++/**
++ * Set the Wpa Supplicant Driver
++ *
++ * @return
++ *      - LE_FAULT if the function failed.
++ *      - LE_BAD_PARAMETER if parameter is invalid.
++ *      - LE_OK if the function succeeded.
++ *
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t SetWpaSupplicantDriver
++(
++    AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
++    string wpaSupplicantDriver[le_wifiDefs.MAX_WPA_SUPPLICANT_DRIVER_BYTES]
++                                   IN ///< WPA Supplicant Driver
++);
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+@@ -393,6 +419,40 @@ FUNCTION le_result_t SetPassphrase
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Set the wireless interface.
++ *
++ * @return
++ *      - LE_FAULT if the function failed.
++ *      - LE_BAD_PARAMETER if parameter is invalid.
++ *      - LE_OK if the function succeeded.
++ *
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t SetInterface
++(
++    AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
++    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface.
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * Get the wireless interface.
++ *
++ * @return
++ *      - LE_FAULT if the function failed.
++ *      - LE_BAD_PARAMETER if parameter is invalid.
++ *      - LE_OK if the function succeeded.
++ *
++ */
++//--------------------------------------------------------------------------------------------------
++FUNCTION le_result_t GetInterface
++(
++    AccessPoint accessPointRef IN, ///< WiFi Access Point reference.
++    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] OUT ///< The WiFi interface.
++);
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Set the Pre Shared Key, PSK.
+  * @note the difference between le_wifiClient_SetPassphrase() and this function
+  *
+@@ -523,4 +583,5 @@ FUNCTION le_result_t Connect
+ //--------------------------------------------------------------------------------------------------
+ FUNCTION le_result_t Disconnect
+ (
++    AccessPoint accessPointRef IN  ///< WiFi Access Point reference.
+ );
+diff --git a/interfaces/wifi/le_wifiDefs.api b/interfaces/wifi/le_wifiDefs.api
+index bd5b986e0..651b44168 100644
+--- a/interfaces/wifi/le_wifiDefs.api
++++ b/interfaces/wifi/le_wifiDefs.api
+@@ -150,3 +150,26 @@ DEFINE MAX_BSSID_LENGTH      = 17;
+  */
+ //--------------------------------------------------------------------------------------------------
+ DEFINE MAX_BSSID_BYTES       = (MAX_BSSID_LENGTH + 1);
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * The maximum/minimum length of the wireless interface.
++ */
++//--------------------------------------------------------------------------------------------------
++DEFINE MIN_INTERFACE_LENGTH  = 4;
++DEFINE MAX_INTERFACE_LENGTH  = 16;
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * The maximum length of octets of the wireless interface.
++ */
++//--------------------------------------------------------------------------------------------------
++DEFINE MAX_INTERFACE_BYTES        = (MAX_INTERFACE_LENGTH + 1);
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * The maximum length of octets of the WPA supplicant driver name.
++ */
++//--------------------------------------------------------------------------------------------------
++DEFINE MAX_WPA_SUPPLICANT_DRIVER_LENGTH = 8;
++DEFINE MAX_WPA_SUPPLICANT_DRIVER_BYTES  = (MAX_WPA_SUPPLICANT_DRIVER_LENGTH + 1);
+-- 
+2.11.0
+
