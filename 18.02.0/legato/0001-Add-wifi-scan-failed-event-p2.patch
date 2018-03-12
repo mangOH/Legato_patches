@@ -1,0 +1,31 @@
+From 8dd8859aca1ee3ddf6046b978f0f915b76b69a8a Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Wed, 28 Feb 2018 09:48:45 -0800
+Subject: [PATCH 1/3] Add wifi scan failed event - p2
+
+WiFi scan requests may fail and that differs from an empty successful
+scan so introduce a new event to distinguish between the cases.
+
+Resolves: LE-9302
+Change-Id: I89d0e06a63f10ad987e9e977a3569ce8f781228f
+---
+ interfaces/wifi/le_wifiClient.api | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/interfaces/wifi/le_wifiClient.api b/interfaces/wifi/le_wifiClient.api
+index 057c5faa6..425f6732e 100644
+--- a/interfaces/wifi/le_wifiClient.api
++++ b/interfaces/wifi/le_wifiClient.api
+@@ -208,7 +208,8 @@ ENUM Event
+ {
+     EVENT_CONNECTED,     ///< WiFi Client Connected
+     EVENT_DISCONNECTED,  ///< WiFi Client Disconnected
+-    EVENT_SCAN_DONE      ///< WiFi Scan result for available Access Points available
++    EVENT_SCAN_DONE,     ///< WiFi Scan result for available Access Points available
++    EVENT_SCAN_FAILED    ///< WiFi Scan failed
+ };
+ 
+ //--------------------------------------------------------------------------------------------------
+-- 
+2.11.0
+

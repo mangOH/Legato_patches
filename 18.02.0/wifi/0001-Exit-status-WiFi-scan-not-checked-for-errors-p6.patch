@@ -1,0 +1,200 @@
+From 7aac71073bbcd8b26e8c2aa2db616957bf45d5d7 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Wed, 28 Feb 2018 09:52:06 -0800
+Subject: [PATCH 1/3] Exit status WiFi scan not checked for errors - p6
+
+Updated the WiFi service to check the return code of excuting a WiFi scan and
+returning the status to the client via an event.
+
+Resolves: LE-9302
+Change-Id: I6ad45f242a1c2173bedbf43576a09d1e922f0d5f
+---
+ apps/tools/wifi/wifi/wifi_client.c             |  8 ++++
+ service/daemon/le_wifiClient.c                 | 57 ++++++++++++++++++++++----
+ service/platformAdaptor/ti/pa_wifi_client_ti.c | 19 ++++++++-
+ 3 files changed, 73 insertions(+), 11 deletions(-)
+
+diff --git a/apps/tools/wifi/wifi/wifi_client.c b/apps/tools/wifi/wifi/wifi_client.c
+index 022e7b8..104fc87 100644
+--- a/apps/tools/wifi/wifi/wifi_client.c
++++ b/apps/tools/wifi/wifi/wifi_client.c
+@@ -71,6 +71,14 @@ static void WifiClientConnectEventHandler
+             LE_DEBUG("FYI: Got EVENT SCAN, while waiting for CONNECT.");
+         }
+         break;
++
++        case LE_WIFICLIENT_EVENT_SCAN_FAILED:
++        {
++            // This could happen. Not an error. Do nothing.
++            LE_WARN("Got EVENT SCAN FAILED, while waiting for CONNECT.");
++        }
++        break;
++
+         default:
+             LE_ERROR("ERROR Unknown event %d", event);
+         break;
+diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
+index c497806..0fa8528 100644
+--- a/service/daemon/le_wifiClient.c
++++ b/service/daemon/le_wifiClient.c
+@@ -89,6 +89,13 @@ static le_thread_Ref_t ScanThreadRef = NULL;
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Result of completed scan
++ */
++//--------------------------------------------------------------------------------------------------
++static le_result_t ScanResult = LE_OK;
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Event ID for WiFi Event message notification.
+  *
+  */
+@@ -388,7 +395,8 @@ static void MarkAllAccessPointsOld
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Start Scanning for WiFi Access points
+- * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available.
++ * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available or
++ * event EVENT_SCAN_FAILED if there was an error while scanning..
+  *
+  * @return LE_FAULT         Function failed.
+  * @return LE_OK            Function succeeded.
+@@ -400,11 +408,13 @@ static void *ScanThread
+ )
+ {
+     pa_wifiClient_AccessPoint_t accessPoint;
++    le_result_t                 *scanResultPtr = contextPtr;
+     le_result_t                 paResult    = pa_wifiClient_Scan();
+ 
+     if (LE_OK != paResult)
+     {
+         LE_ERROR("Scan failed (%d)", paResult);
++        *scanResultPtr = LE_FAULT;
+         return NULL;
+     }
+ 
+@@ -414,10 +424,23 @@ static void *ScanThread
+ 
+     while (LE_OK == (paResult = pa_wifiClient_GetScanResult(&accessPoint)))
+     {
+-        AddAccessPointToApRefMap(&accessPoint);
++        if (AddAccessPointToApRefMap(&accessPoint) == NULL)
++        {
++            LE_ERROR("pa_wifiClient_ScanDone() failed");
++            paResult = LE_FAULT;
++            break;
++        }
+     }
+ 
+-    pa_wifiClient_ScanDone();
++    *scanResultPtr = ((paResult == LE_OK) || (paResult == LE_NOT_FOUND)) ? LE_OK : paResult;
++
++    paResult = pa_wifiClient_ScanDone();
++    if (LE_OK != paResult)
++    {
++        LE_ERROR("pa_wifiClient_ScanDone() failed (%d)", paResult);
++        *scanResultPtr = paResult;
++        return NULL;
++    }
+ 
+     return NULL;
+ }
+@@ -428,12 +451,26 @@ static void *ScanThread
+  * Thread Destructor for scan
+  */
+ //--------------------------------------------------------------------------------------------------
+-static void ScanThreadDestructor(void *context)
++static void ScanThreadDestructor
++(
++    void *context
++)
+ {
++    le_result_t scanResult = *((le_result_t*)context);
++
+     LE_DEBUG("Scan thread exited.");
+     ScanThreadRef = NULL;
+-    // use the PA callback to generate the event.
+-    PaEventHandler(LE_WIFICLIENT_EVENT_SCAN_DONE, NULL);
++
++    if (scanResult == LE_OK)
++    {
++        // use the PA callback to generate the event.
++        PaEventHandler(LE_WIFICLIENT_EVENT_SCAN_DONE, NULL);
++    }
++    else
++    {
++        LE_WARN("Scan failed");
++        PaEventHandler(LE_WIFICLIENT_EVENT_SCAN_FAILED, NULL);
++    }
+ }
+ 
+ 
+@@ -661,7 +698,8 @@ le_result_t le_wifiClient_Stop
+ //--------------------------------------------------------------------------------------------------
+ /**
+  * Start scanning for WiFi access points
+- * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available.
++ * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available or
++ * event EVENT_SCAN_FAILED if there was an error while scanning.
+  *
+  * @return LE_FAULT         Function failed.
+  * @return LE_OK            Function succeeded.
+@@ -677,8 +715,9 @@ le_result_t le_wifiClient_Scan
+         LE_DEBUG("Scan started");
+ 
+         // Start the thread
+-        ScanThreadRef = le_thread_Create("WiFi Client Scan Thread", ScanThread, NULL);
+-        le_thread_AddChildDestructor(ScanThreadRef, ScanThreadDestructor, NULL);
++        ScanResult = LE_OK;
++        ScanThreadRef = le_thread_Create("WiFi Client Scan Thread", ScanThread, &ScanResult);
++        le_thread_AddChildDestructor(ScanThreadRef, ScanThreadDestructor, &ScanResult);
+ 
+         le_thread_Start(ScanThreadRef);
+         return LE_OK;
+diff --git a/service/platformAdaptor/ti/pa_wifi_client_ti.c b/service/platformAdaptor/ti/pa_wifi_client_ti.c
+index 466a3e4..d15476d 100644
+--- a/service/platformAdaptor/ti/pa_wifi_client_ti.c
++++ b/service/platformAdaptor/ti/pa_wifi_client_ti.c
+@@ -552,6 +552,7 @@ le_result_t pa_wifiClient_GetScanResult
+  * It signals that the scan results are no longer needed and frees some internal resources.
+  *
+  * @return LE_OK     The function succeeded.
++ * @return LE_FAULT  The scan failed.
+  */
+ //--------------------------------------------------------------------------------------------------
+ le_result_t pa_wifiClient_ScanDone
+@@ -559,13 +560,27 @@ le_result_t pa_wifiClient_ScanDone
+     void
+ )
+ {
++    le_result_t res = LE_OK;
++
+     if (NULL != IwScanPipePtr)
+     {
+-        pclose(IwScanPipePtr);
++        int st = pclose(IwScanPipePtr);
++        if (WIFEXITED(st))
++        {
++            LE_DEBUG("Scan exit status(%d)", WEXITSTATUS(st));
++            res = WEXITSTATUS(st) ? LE_FAULT:LE_OK;
++            if (res != LE_OK)
++            {
++                LE_ERROR("Scan failed(%d)", WEXITSTATUS(st));
++                res = LE_FAULT;
++            }
++        }
++
+         IwScanPipePtr = NULL;
+         IsScanRunning = false;
+     }
+-    return LE_OK;
++
++    return res;
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+-- 
+2.11.0
+

@@ -1,7 +1,7 @@
-From e1f3ee9d366bc72f4946df8cfe2fb9d59a8d0553 Mon Sep 17 00:00:00 2001
+From 4f3aad3198d9b742d519eefb5f0d7153274d9c9e Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Fri, 3 Nov 2017 10:16:34 -0700
-Subject: [PATCH] Add mangOH Red mt7697 wifi support
+Subject: [PATCH 3/3] Add mangOH Red mt7697 wifi support
 
 The data connection service and wifi client/AP have been updated to support the
 mt7697 WiFi on the mangOH Red.
@@ -545,7 +545,7 @@ index ebdee1a3c..a9402d196 100644
 +    string interface[le_wifiDefs.MAX_INTERFACE_BYTES] IN ///< The WiFi interface of the Access Point.
  );
 diff --git a/interfaces/wifi/le_wifiClient.api b/interfaces/wifi/le_wifiClient.api
-index 057c5faa6..034b50d72 100644
+index 425f6732e..258ecc8bb 100644
 --- a/interfaces/wifi/le_wifiClient.api
 +++ b/interfaces/wifi/le_wifiClient.api
 @@ -201,6 +201,17 @@ REFERENCE AccessPoint;
@@ -566,7 +566,7 @@ index 057c5faa6..034b50d72 100644
   * WiFi Client Events.
   */
  //--------------------------------------------------------------------------------------------------
-@@ -227,7 +238,6 @@ ENUM SecurityProtocol
+@@ -228,7 +239,6 @@ ENUM SecurityProtocol
  };
  
  
@@ -574,7 +574,7 @@ index 057c5faa6..034b50d72 100644
  //--------------------------------------------------------------------------------------------------
  /**
   * Handler for WiFi Client changes
-@@ -374,7 +384,23 @@ FUNCTION le_result_t GetSsid
+@@ -375,7 +385,23 @@ FUNCTION le_result_t GetSsid
      uint8 ssid[le_wifiDefs.MAX_SSID_BYTES] OUT ///< The SSID returned as a octet array.
  );
  
@@ -599,7 +599,7 @@ index 057c5faa6..034b50d72 100644
  
  //--------------------------------------------------------------------------------------------------
  /**
-@@ -397,6 +423,40 @@ FUNCTION le_result_t SetPassphrase
+@@ -398,6 +424,40 @@ FUNCTION le_result_t SetPassphrase
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -640,7 +640,7 @@ index 057c5faa6..034b50d72 100644
   * Set the Pre Shared Key, PSK.
   * @note the difference between le_wifiClient_SetPassphrase() and this function
   *
-@@ -546,4 +606,5 @@ FUNCTION le_result_t Connect
+@@ -547,4 +607,5 @@ FUNCTION le_result_t Connect
  //--------------------------------------------------------------------------------------------------
  FUNCTION le_result_t Disconnect
  (

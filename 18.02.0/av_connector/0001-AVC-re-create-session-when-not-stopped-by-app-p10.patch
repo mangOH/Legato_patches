@@ -1,0 +1,256 @@
+From 1f96d3c9d417dc223b596c54945afa1fb60d537c Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Tue, 27 Feb 2018 14:43:49 -0800
+Subject: [PATCH 1/2] AVC re-create session when not stopped by app - p10
+
+This change updates the AVC to re-start the connection timer if the session
+was not initiated to be stopped by the application.
+
+Resolves: LE-9564
+Change-Id: Ida65677c2dd7e825a9df6c417724955f02fbf6f4
+---
+ avcClient/avcClient.c | 203 +++++++++++++++++++++++++++-----------------------
+ 1 file changed, 111 insertions(+), 92 deletions(-)
+
+diff --git a/avcClient/avcClient.c b/avcClient/avcClient.c
+index 9747046..4cd1b35 100644
+--- a/avcClient/avcClient.c
++++ b/avcClient/avcClient.c
+@@ -239,95 +239,6 @@ static void CheckDateTimeValidity
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+- *  Callback registered in LwM2M client for bearer related events.
+- */
+-//--------------------------------------------------------------------------------------------------
+-static void BearerEventCb
+-(
+-    bool connected,     ///< [IN] Indicates if the bearer is connected or disconnected.
+-    void* contextPtr    ///< [IN] User data.
+-)
+-{
+-    LE_INFO("Connected %d", connected);
+-    if (connected)
+-    {
+-        char endpointPtr[LWM2MCORE_ENDPOINT_LEN] = {0};
+-
+-        // Register objects to LwM2M and set the device endpoint:
+-        // - Endpoint shall be unique for each client: IMEI/ESN/MEID.
+-        // - The number of objects we will be passing through and the objects array.
+-
+-        // Get the device endpoint: IMEI.
+-        if (LE_OK != le_info_GetImei((char*)endpointPtr, (uint32_t) LWM2MCORE_ENDPOINT_LEN))
+-        {
+-            LE_ERROR("Error to retrieve the device IMEI");
+-            return;
+-        }
+-
+-        // Register to the LwM2M agent.
+-        if (!lwm2mcore_ObjectRegister(Lwm2mInstanceRef, endpointPtr, NULL, NULL))
+-        {
+-            LE_ERROR("ERROR in LwM2M obj reg");
+-            return;
+-        }
+-
+-        if (!lwm2mcore_Connect(Lwm2mInstanceRef))
+-        {
+-            LE_ERROR("Connect error");
+-        }
+-    }
+-    else
+-    {
+-        if (NULL != Lwm2mInstanceRef)
+-        {
+-            // If the LWM2MCORE_TIMER_STEP timer is running, this means that a connection is active.
+-            if (lwm2mcore_TimerIsRunning(LWM2MCORE_TIMER_STEP))
+-            {
+-                avcClient_Disconnect(false);
+-            }
+-        }
+-    }
+-}
+-
+-//--------------------------------------------------------------------------------------------------
+-/**
+- * Callback for the connection state.
+- */
+-//--------------------------------------------------------------------------------------------------
+-static void ConnectionStateHandler
+-(
+-    const char* intfNamePtr,    ///< [IN] Interface name.
+-    bool connected,             ///< [IN] connection state (true = connected, else false).
+-    void* contextPtr            ///< [IN] User data.
+-)
+-{
+-    if (connected)
+-    {
+-        LE_DEBUG("Connected through interface '%s'", intfNamePtr);
+-        DataConnected = true;
+-
+-        // Check if date/time is valid when connected.
+-        CheckDateTimeValidity();
+-
+-        // Call the callback.
+-        BearerEventCb(connected, contextPtr);
+-    }
+-    else
+-    {
+-        LE_WARN("Disconnected from data connection service, current state %d", DataConnected);
+-        if (DataConnected)
+-        {
+-            // Call the callback.
+-            BearerEventCb(connected, contextPtr);
+-            DataConnected = false;
+-            SessionStarted = false;
+-            AuthenticationPhase = false;
+-        }
+-    }
+-}
+-
+-//--------------------------------------------------------------------------------------------------
+-/**
+  * Callback for the LwM2M events linked to package download and update.
+  *
+  * @return
+@@ -637,6 +548,109 @@ static int EventHandler
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ *  Callback registered in LwM2M client for bearer related events.
++ */
++//--------------------------------------------------------------------------------------------------
++static void BearerEventCb
++(
++    bool connected,     ///< [IN] Indicates if the bearer is connected or disconnected.
++    void* contextPtr    ///< [IN] User data.
++)
++{
++    LE_INFO("Connected %d", connected);
++    if (connected)
++    {
++        LE_DEBUG("Session started(%d)", SessionStarted);
++        if (!SessionStarted)
++        {
++            char endpointPtr[LWM2MCORE_ENDPOINT_LEN] = {0};
++
++            // Attempt to connect.
++            if (NULL == Lwm2mInstanceRef)
++            {
++                Lwm2mInstanceRef = lwm2mcore_Init(EventHandler);
++            }
++
++            // Register objects to LwM2M and set the device endpoint:
++            // - Endpoint shall be unique for each client: IMEI/ESN/MEID.
++            // - The number of objects we will be passing through and the objects array.
++
++            // Get the device endpoint: IMEI.
++            if (LE_OK != le_info_GetImei((char*)endpointPtr, (uint32_t) LWM2MCORE_ENDPOINT_LEN))
++            {
++                LE_ERROR("Error to retrieve the device IMEI");
++                return;
++            }
++
++            // Register to the LwM2M agent.
++            if (!lwm2mcore_ObjectRegister(Lwm2mInstanceRef, endpointPtr, NULL, NULL))
++            {
++                LE_ERROR("ERROR in LwM2M obj reg");
++                return;
++            }
++
++            if (!lwm2mcore_Connect(Lwm2mInstanceRef))
++            {
++                LE_ERROR("Connect error");
++            }
++        }
++        else
++        {
++            LE_INFO("Session already started");
++        }
++    }
++    else
++    {
++        if (NULL != Lwm2mInstanceRef)
++        {
++            // If the LWM2MCORE_TIMER_STEP timer is running, this means that a connection is active.
++            if (lwm2mcore_TimerIsRunning(LWM2MCORE_TIMER_STEP))
++            {
++                avcClient_Disconnect(false);
++            }
++        }
++    }
++}
++
++//--------------------------------------------------------------------------------------------------
++/**
++ * Callback for the connection state.
++ */
++//--------------------------------------------------------------------------------------------------
++static void ConnectionStateHandler
++(
++    const char* intfNamePtr,    ///< [IN] Interface name.
++    bool connected,             ///< [IN] connection state (true = connected, else false).
++    void* contextPtr            ///< [IN] User data.
++)
++{
++    if (connected)
++    {
++        LE_DEBUG("Connected through interface '%s'", intfNamePtr);
++        DataConnected = true;
++
++        // Check if date/time is valid when connected.
++        CheckDateTimeValidity();
++
++        // Call the callback.
++        BearerEventCb(connected, contextPtr);
++    }
++    else
++    {
++        LE_WARN("Disconnected from data connection service, current state %d", DataConnected);
++        if (DataConnected)
++        {
++            // Call the callback.
++            BearerEventCb(connected, contextPtr);
++            DataConnected = false;
++            SessionStarted = false;
++            AuthenticationPhase = false;
++        }
++    }
++}
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Reset the retry timers by resetting the retrieved reset timer config, and stopping the current
+  * retry timer.
+  */
+@@ -758,7 +772,8 @@ static void BsFailureHandler
+     void* reportPtr    ///< [IN] Pointer to the event report payload
+ )
+ {
+-    avcClient_Disconnect(true);
++    LE_DEBUG("Bootstrap failure");
++    avcClient_Disconnect(false);
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -934,12 +949,16 @@ le_result_t avcClient_Disconnect
+         result = LE_DUPLICATE;
+     }
+ 
+-    StopBearer();
+-
+     if (resetRetry)
+     {
++        StopBearer();
+         ResetRetryTimers();
+     }
++    else if (NULL != Lwm2mInstanceRef)
++    {
++        lwm2mcore_Free(Lwm2mInstanceRef);
++        Lwm2mInstanceRef = NULL;
++    }
+ 
+     return result;
+ }
+-- 
+2.11.0
+

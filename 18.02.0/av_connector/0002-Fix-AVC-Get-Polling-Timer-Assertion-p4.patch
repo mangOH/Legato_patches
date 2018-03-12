@@ -1,0 +1,69 @@
+From 211fed5e8d237b003b98d1eb3e58fd88f71ff781 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Tue, 6 Mar 2018 08:24:27 -0800
+Subject: [PATCH 2/2] Fix AVC Get Polling Timer Assertion - p4
+
+Updated the AVC get polling timer to return a default value of 1 minute if
+the lifetime could not be retrieved from LwM2MCore.
+
+Resolves: LE-9633
+Change-Id: Ic3139ecdac94e9ecaae6643ddc0f567f06417895
+---
+ avcDaemon/avcServer.c | 26 ++++++++++++++++++--------
+ 1 file changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/avcDaemon/avcServer.c b/avcDaemon/avcServer.c
+index 0f119c3..83fd9d8 100644
+--- a/avcDaemon/avcServer.c
++++ b/avcDaemon/avcServer.c
+@@ -104,6 +104,13 @@
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Default polling timer value in minutes if value cannot be retrieved from LwM2MCore
++ */
++//--------------------------------------------------------------------------------------------------
++#define POLLING_TIMER_DEFAULT_VAL 1
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Current internal state.
+  *
+  * Used mainly to ensure that API functions don't do anything if in the wrong state.
+@@ -1851,13 +1858,14 @@ static void PollingTimerExpiryHandler
+ 
+     // Restart the timer for the next interval
+     uint32_t pollingTimerInterval;
+-    LE_ASSERT(LE_OK == le_avc_GetPollingTimer(&pollingTimerInterval));
+-
+-    LE_INFO("A connection to server will be made in %d minutes", pollingTimerInterval);
++    if (LE_OK == le_avc_GetPollingTimer(&pollingTimerInterval))
++    {
++        LE_INFO("A connection to server will be made in %d minutes", pollingTimerInterval);
+ 
+-    le_clk_Time_t interval = {.sec = pollingTimerInterval * SECONDS_IN_A_MIN};
+-    LE_ASSERT(LE_OK == le_timer_SetInterval(PollingTimerRef, interval));
+-    LE_ASSERT(LE_OK == le_timer_Start(PollingTimerRef));
++        le_clk_Time_t interval = {.sec = pollingTimerInterval * SECONDS_IN_A_MIN};
++        LE_ASSERT(LE_OK == le_timer_SetInterval(PollingTimerRef, interval));
++        LE_ASSERT(LE_OK == le_timer_Start(PollingTimerRef));
++    }
+ }
+ 
+ //-------------------------------------------------------------------------------------------------
+@@ -3474,8 +3482,10 @@ le_result_t le_avc_GetPollingTimer
+     sid = lwm2mcore_GetLifetime(&lifetime);
+     if (LWM2MCORE_ERR_COMPLETED_OK != sid)
+     {
+-        LE_ERROR("Unable to read lifetime from server configuration");
+-        return LE_FAULT;
++        LE_WARN("Unable to read lifetime from server configuration, using(%u) minutes",
++                POLLING_TIMER_DEFAULT_VAL);
++        *pollingTimerPtr = POLLING_TIMER_DEFAULT_VAL;
++        return LE_OK;
+     }
+ 
+     if (LWM2MCORE_LIFETIME_VALUE_DISABLED == lifetime)
+-- 
+2.11.0
+
