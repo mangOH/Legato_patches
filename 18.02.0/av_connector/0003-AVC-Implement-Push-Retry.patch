@@ -1,0 +1,155 @@
+From 77e355a305a54d53eeda16ea351ea25b62130f2c Mon Sep 17 00:00:00 2001
+From: Prushothaman Palanichamy <ppalanicha@sierrawireless.com>
+Date: Mon, 19 Mar 2018 18:51:43 -0700
+Subject: [PATCH] Implement push retry
+
+Resolves: LE-9416
+Change-Id: I7af67727f7a6db9aff132cc4118163ed5192ae65
+---
+
+diff --git a/apps/test/airVantageConnectorUnitTest/airVantageConnectorComp/airVantageConnector_stub.c b/apps/test/airVantageConnectorUnitTest/airVantageConnectorComp/airVantageConnector_stub.c
+index cda256f..7c9402b 100644
+--- a/apps/test/airVantageConnectorUnitTest/airVantageConnectorComp/airVantageConnector_stub.c
++++ b/apps/test/airVantageConnectorUnitTest/airVantageConnectorComp/airVantageConnector_stub.c
+@@ -133,6 +133,24 @@
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Retry pushing items queued in the list after AV connection reset
++ *
++ * @return
++ *  - LE_OK             The function succeeded
++ *  - LE_NOT_FOUND      If nothing to be retried
++ *  - LE_FAULT          On any other errors
++ */
++//--------------------------------------------------------------------------------------------------
++le_result_t push_Retry
++(
++    void
++)
++{
++    return LE_OK;
++}
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Initialization function avcApp. Should be called only once.
+  */
+ //--------------------------------------------------------------------------------------------------
+diff --git a/avcDaemon/avcServer.c b/avcDaemon/avcServer.c
+index 7ddb0a6..0b3bd8e 100644
+--- a/avcDaemon/avcServer.c
++++ b/avcDaemon/avcServer.c
+@@ -1493,6 +1493,9 @@
+             // Update object9 list managed by legato to lwm2mcore
+             avcApp_NotifyObj9List();
+             avData_ReportSessionState(LE_AVDATA_SESSION_STARTED);
++
++            // Push items waiting in queue
++            push_Retry();
+             break;
+ 
+         case LE_AVC_SESSION_STOPPED:
+diff --git a/avcDaemon/push.c b/avcDaemon/push.c
+index 59d6c59..043c999 100644
+--- a/avcDaemon/push.c
++++ b/avcDaemon/push.c
+@@ -208,9 +208,11 @@
+         {
+             LE_DEBUG("Data has been queued.");
+             pDataPtr->isSent = false;
+-            memcpy(pDataPtr->buffer, bufferPtr, bufferLength);
+-            pDataPtr->bufferLength = bufferLength;
+         }
++
++        // Save data to send
++        pDataPtr->bufferLength = bufferLength;
++        memcpy(pDataPtr->buffer, bufferPtr, bufferLength);
+ 
+         pDataPtr->handlerPtr = handlerPtr;
+         pDataPtr->callbackContextPtr = contextPtr;
+@@ -229,6 +231,57 @@
+     return result;
+ }
+ 
++//--------------------------------------------------------------------------------------------------
++/**
++ * Retry pushing items queued in the list after AV connection reset
++ *
++ * @return
++ *  - LE_OK             The function succeeded
++ *  - LE_NOT_FOUND      If nothing to be retried
++ *  - LE_FAULT          On any other errors
++ */
++//--------------------------------------------------------------------------------------------------
++le_result_t push_Retry
++(
++    void
++)
++{
++    le_result_t result = LE_NOT_FOUND;
++    uint16_t mid;
++
++    // Clean the queue for the one in progress
++    le_dls_Link_t* linkPtr = le_dls_Peek(&PushDataList);
++
++    LE_INFO("Push Retry");
++
++    // Return callback with associated message id
++    while (linkPtr != NULL)
++    {
++        PushData_t* pDataPtr = CONTAINER_OF(linkPtr, PushData_t, link);
++        if (pDataPtr->isSent == true)
++        {
++            // Retry push again
++            result = avcClient_Push(pDataPtr->buffer,
++                                    pDataPtr->bufferLength,
++                                    pDataPtr->contentType,
++                                    &mid);
++
++            // Retry was successful, otherwise we need to keep it in the queue until next try
++            if (result == LE_OK)
++            {
++               LE_DEBUG("Failed mid = %d. Retry mid = %d", pDataPtr->mid, mid);
++               pDataPtr->mid = mid;
++               IsPushing = true;
++            }
++
++            break;
++        }
++
++        linkPtr = le_dls_PeekNext(&PushDataList, linkPtr);
++    }
++
++    return result;
++}
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
+diff --git a/avcDaemon/push.h b/avcDaemon/push.h
+index 15d3e4e..be8d17b 100644
+--- a/avcDaemon/push.h
++++ b/avcDaemon/push.h
+@@ -51,6 +51,22 @@
+ 
+ //--------------------------------------------------------------------------------------------------
+ /**
++ * Retry pushing items queued in the list after AV connection reset
++ *
++ * @return
++ *  - LE_OK             The function succeeded
++ *  - LE_NOT_FOUND      If nothing to be retried
++ *  - LE_FAULT          On any other errors
++ */
++//--------------------------------------------------------------------------------------------------
++LE_SHARED le_result_t push_Retry
++(
++    void
++);
++
++
++//--------------------------------------------------------------------------------------------------
++/**
+  * Init push subcomponent
+  */
+ //--------------------------------------------------------------------------------------------------
