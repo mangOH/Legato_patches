@@ -1,0 +1,46 @@
+From d5f2f19549e9861b062d47dc84be16a0a8195eec Mon Sep 17 00:00:00 2001
+From: David Frey <dfrey@sierrawireless.com>
+Date: Wed, 21 Feb 2018 11:23:20 -0800
+Subject: [PATCH 1/2] Define $SPI_PRIMARY_BUS buildVar
+
+Providing a buildVar to specify the SPI primary bus allows for the
+override of the default (0) when the primary SPI bus differs.  The WP76
+for example uses bus 1 as it's primary SPI bus.
+
+Resolves: #23
+---
+ apps/platformServices/spiService.adef | 4 ++++
+ targets/mdm9x07.sinc                  | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/apps/platformServices/spiService.adef b/apps/platformServices/spiService.adef
+index c34388a9c..989fddc6c 100644
+--- a/apps/platformServices/spiService.adef
++++ b/apps/platformServices/spiService.adef
+@@ -31,7 +31,11 @@ requires:
+ {
+     device:
+     {
++#if ${SPI_PRIMARY_BUS} = ""
+         [rw] /dev/spidev0.0 /dev/
++#else
++        [rw] /dev/spidev${SPI_PRIMARY_BUS}.0 /dev/
++#endif
+     }
+ }
+ 
+diff --git a/targets/mdm9x07.sinc b/targets/mdm9x07.sinc
+index 98ae2edb9..a0b123a26 100644
+--- a/targets/mdm9x07.sinc
++++ b/targets/mdm9x07.sinc
+@@ -12,6 +12,7 @@ buildVars:
+     LEGATO_QMI_FWUPDATE_PA_SRC = ${PA_DIR}/qmi/src/components/le_pa_fwupdate/fdt/le_pa_fwupdate
+     LEGATO_QMI_UTIL_SRC = ${PA_DIR}/qmi/src/components/swiQmi/mdm9x28/swiQmi
+     LEGATO_QMI_RSIM_PA_SRC = ${PA_DIR}/qmi/src/components/le_pa_remotesim
++    SPI_PRIMARY_BUS = 1
+ }
+ 
+ #include mdm9xxx.sinc
+-- 
+2.11.0
+
