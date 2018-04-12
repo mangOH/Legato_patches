@@ -1,4 +1,4 @@
-From 0585558ae1ce04cf36b73707c3da45e9932d5322 Mon Sep 17 00:00:00 2001
+From ed8641a042e37615d39efa62d5b663671ee16a7d Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Tue, 12 Dec 2017 14:12:30 -0800
 Subject: [PATCH 2/2] Add support for multiple wlan interfaces
@@ -723,7 +723,7 @@ index 0990c5d..709596b 100644
  }
  
 diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
-index 63d8774..c3d7bd8 100644
+index 0e427a3..016e1d0 100644
 --- a/service/daemon/le_wifiClient.c
 +++ b/service/daemon/le_wifiClient.c
 @@ -239,9 +239,10 @@ static le_wifiClient_AccessPointRef_t AddAccessPointToApRefMap
@@ -913,7 +913,7 @@ index 63d8774..c3d7bd8 100644
  }
  
 diff --git a/service/platformAdaptor/inc/pa_wifi.h b/service/platformAdaptor/inc/pa_wifi.h
-index ea78143..50c488b 100644
+index 29d8123..2abdd61 100644
 --- a/service/platformAdaptor/inc/pa_wifi.h
 +++ b/service/platformAdaptor/inc/pa_wifi.h
 @@ -25,6 +25,11 @@ typedef struct
@@ -928,7 +928,7 @@ index ea78143..50c488b 100644
  //--------------------------------------------------------------------------------------------------
  /**
   * Event handler for PA WiFi access point changes.
-@@ -196,6 +201,39 @@ LE_SHARED le_result_t pa_wifiClient_SetUserCredentials
+@@ -197,6 +202,39 @@ LE_SHARED le_result_t pa_wifiClient_SetUserCredentials
  
  //--------------------------------------------------------------------------------------------------
  /**
@@ -968,7 +968,7 @@ index ea78143..50c488b 100644
   * Set the PassPhrase used to create PSK (WPA-Personal).
   * @see  pa_wifiClient_SetPreSharedKey
   *
-@@ -275,6 +313,21 @@ LE_SHARED le_result_t pa_wifiClient_SetSecurityProtocol
+@@ -276,6 +314,21 @@ LE_SHARED le_result_t pa_wifiClient_SetSecurityProtocol
  
  //--------------------------------------------------------------------------------------------------
  /**

@@ -1,18 +1,19 @@
-From 8b97bad37b991793a40231ce6e532acc8f5fe542 Mon Sep 17 00:00:00 2001
+From ad0444f0fa1bd99e413a7bd5553212f2645dad7c Mon Sep 17 00:00:00 2001
 From: David Clark <dclark@sierrawireless.com>
 Date: Wed, 28 Feb 2018 09:52:06 -0800
-Subject: [PATCH 1/2] Exit status WiFi scan not checked for errors - p6
+Subject: [PATCH 1/2] Exit status WiFi scan not checked for errors - p10
 
 Updated the WiFi service to check the return code of excuting a WiFi scan and
 returning the status to the client via an event.
 
-Resolves: LE-9302
+Resolves: LE-9739
 Change-Id: I6ad45f242a1c2173bedbf43576a09d1e922f0d5f
 ---
  apps/tools/wifi/wifi/wifi_client.c             |  8 ++++
  service/daemon/le_wifiClient.c                 | 57 ++++++++++++++++++++++----
+ service/platformAdaptor/inc/pa_wifi.h          |  1 +
  service/platformAdaptor/ti/pa_wifi_client_ti.c | 19 ++++++++-
- 3 files changed, 73 insertions(+), 11 deletions(-)
+ 4 files changed, 74 insertions(+), 11 deletions(-)
 
 diff --git a/apps/tools/wifi/wifi/wifi_client.c b/apps/tools/wifi/wifi/wifi_client.c
 index 022e7b8..104fc87 100644
@@ -34,7 +35,7 @@ index 022e7b8..104fc87 100644
              LE_ERROR("ERROR Unknown event %d", event);
          break;
 diff --git a/service/daemon/le_wifiClient.c b/service/daemon/le_wifiClient.c
-index 3bbc2fc..63d8774 100644
+index 3bbc2fc..0e427a3 100644
 --- a/service/daemon/le_wifiClient.c
 +++ b/service/daemon/le_wifiClient.c
 @@ -89,6 +89,13 @@ static le_thread_Ref_t ScanThreadRef = NULL;
@@ -56,8 +57,8 @@ index 3bbc2fc..63d8774 100644
  /**
   * Start Scanning for WiFi Access points
 - * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available.
-+ * Will result in event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available or
-+ * event EVENT_SCAN_FAILED if there was an error while scanning..
++ * Will result in an event LE_WIFICLIENT_EVENT_SCAN_DONE when the scan results are available or
++ * an event LE_WIFICLIENT_EVENT_SCAN_FAILED if there was an error while scanning.
   *
   * @return LE_FAULT         Function failed.
   * @return LE_OK            Function succeeded.
@@ -153,6 +154,18 @@ index 3bbc2fc..63d8774 100644
  
          le_thread_Start(ScanThreadRef);
          return LE_OK;
+diff --git a/service/platformAdaptor/inc/pa_wifi.h b/service/platformAdaptor/inc/pa_wifi.h
+index ea78143..29d8123 100644
+--- a/service/platformAdaptor/inc/pa_wifi.h
++++ b/service/platformAdaptor/inc/pa_wifi.h
+@@ -138,6 +138,7 @@ LE_SHARED le_result_t pa_wifiClient_GetScanResult
+  * It signals that the scan results are no longer needed and frees some internal resourses.
+  *
+  * @return LE_OK     The function succeeded.
++ * @return LE_FAULT  The scan failed
+  */
+ //--------------------------------------------------------------------------------------------------
+ LE_SHARED le_result_t pa_wifiClient_ScanDone
 diff --git a/service/platformAdaptor/ti/pa_wifi_client_ti.c b/service/platformAdaptor/ti/pa_wifi_client_ti.c
 index 9c6bb56..30ef03d 100644
 --- a/service/platformAdaptor/ti/pa_wifi_client_ti.c
