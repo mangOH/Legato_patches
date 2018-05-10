@@ -1,0 +1,123 @@
+From 0aa8fc70aa55e385949f42b99640d95b462984a9 Mon Sep 17 00:00:00 2001
+From: David Clark <dclark@sierrawireless.com>
+Date: Fri, 4 May 2018 10:23:35 -0700
+Subject: [PATCH] Fix processing of duplicate message IDs
+
+Updated LwM2MCore to keep track of the last received message ID (and
+if it is valid) and only process those message IDs which have not
+already been received.
+
+Resolves: LE-10115
+Change-Id: I4cc45f88c859082c46b9d546f0c9c5a0f807f3bb
+Signed-off-by: David Clark <dclark@sierrawireless.com>
+---
+ core/liblwm2m.h |  2 ++
+ core/packet.c   | 53 +++++++++++++++++++++++++++++++++++++++++++++++++----
+ 2 files changed, 51 insertions(+), 4 deletions(-)
+
+diff --git a/core/liblwm2m.h b/core/liblwm2m.h
+index 96912c7..df03e23 100644
+--- a/core/liblwm2m.h
++++ b/core/liblwm2m.h
+@@ -524,6 +524,8 @@ typedef struct _lwm2m_server_
+     void *                  sessionH;
+     lwm2m_status_t          status;
+     char *                  location;
++    uint16_t                lastRxMID;    // last MID received
++    bool                    midReceived;  // received MID flag
+     bool                    dirty;
+     lwm2m_block1_data_t *   block1Data;   // buffer to handle block1 data, should be replace by a list to support several block1 transfer by server.
+ } lwm2m_server_t;
+diff --git a/core/packet.c b/core/packet.c
+index a3496fd..2827808 100644
+--- a/core/packet.c
++++ b/core/packet.c
+@@ -146,10 +146,33 @@ static bool is_block_transfer(coap_packet_t * message, uint32_t * block_num, uin
+ }
+ #endif
+ 
++static bool record_received_mid(lwm2m_server_t * serverP,
++                                uint16_t mid)
++{
++    uint16_t expectedMid = serverP->midReceived + 1;
++    bool validMid;
++
++    if (!serverP->midReceived || (mid == expectedMid))
++    {
++        validMid = true;
++        serverP->midReceived = true;
++        serverP->lastRxMID = mid;
++    }
++    else
++    {
++        validMid = false;
++        LOG_ARG("WARNING: Received unexpected request midReceived(%u) MID(%u != %u)",
++            serverP->midReceived, mid, expectedMid);
++    }
++
++    return validMid;
++}
++
+ static uint8_t handle_request(lwm2m_context_t * contextP,
+                               void * fromSessionH,
+                               coap_packet_t * message,
+-                              coap_packet_t * response)
++                              coap_packet_t * response,
++                              bool validMid)
+ {
+     lwm2m_uri_t * uriP = NULL;
+     uint8_t result = COAP_IGNORE;
+@@ -197,8 +220,12 @@ static uint8_t handle_request(lwm2m_context_t * contextP,
+                     coap_init_message(response, COAP_TYPE_ACK, 0, message->mid);
+                     message_send(contextP, response, fromSessionH);
+ 
+-                    // Get actual response from user app
+-                    return lwm2mcore_CallCoapEventHandler(message);
++                    LOG_ARG("Valid(%u) mid(%u)", validMid, message->mid);
++                    if (validMid)
++                    {
++                        // Get actual response from user app
++                        return lwm2mcore_CallCoapEventHandler(message);
++                    }
+                 }
+             }
+         }
+@@ -444,6 +471,7 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
+             uint16_t block_size = REST_MAX_CHUNK_SIZE;
+             uint32_t block_offset = 0;
+             int64_t new_offset = 0;
++            bool validMid = true;
+ 
+             /* prepare response */
+             if (message->type == COAP_TYPE_CON)
+@@ -519,9 +547,26 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
+                 coap_error_code = COAP_501_NOT_IMPLEMENTED;
+ #endif
+             }
++            else
++            {
++#ifdef LWM2M_CLIENT_MODE
++                // get server
++                lwm2m_server_t *serverP = utils_findServer(contextP, fromSessionH);
++#ifdef LWM2M_BOOTSTRAP
++                if (serverP == NULL)
++                {
++                    serverP = utils_findBootstrapServer(contextP, fromSessionH);
++                }
++#endif
++#endif
++                if (serverP != NULL)
++                {
++                    validMid = record_received_mid(serverP, message->mid);
++                }
++            }
+             if (coap_error_code == NO_ERROR)
+             {
+-                coap_error_code = handle_request(contextP, fromSessionH, message, response);
++                coap_error_code = handle_request(contextP, fromSessionH, message, response, validMid);
+             }
+             if (coap_error_code==NO_ERROR)
+             {
+-- 
+2.11.0
+

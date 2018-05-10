@@ -62,7 +62,12 @@ apply_patchset legato       $LEGATO_ROOT
 apply_patchset wifi         $LEGATO_ROOT/modules/WiFi
 apply_patchset av_connector $LEGATO_ROOT/apps/platformServices/airVantageConnector
 apply_patchset lwm2mcore    $LEGATO_ROOT/3rdParty/Lwm2mCore
-apply_patchset wakaama      $LEGATO_ROOT/3rdParty/Lwm2mCore/wakaama
+if [[ "$PATCH_BASE" > "18.03.0" ]]
+then
+    apply_patchset wakaama      $LEGATO_ROOT/3rdParty/Lwm2mCore/3rdParty/wakaama
+else
+    apply_patchset wakaama      $LEGATO_ROOT/3rdParty/Lwm2mCore/wakaama
+fi
 
 echo "==========================="
 echo "All patches applied successfully"

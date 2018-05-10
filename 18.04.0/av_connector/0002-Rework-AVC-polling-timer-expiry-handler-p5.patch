@@ -1,0 +1,51 @@
+From 7646993031ba45a60868509fd6dff5e2756c5404 Mon Sep 17 00:00:00 2001
+From: Oussama ABID <oabid@sierrawireless.com>
+Date: Mon, 7 May 2018 16:04:01 +0200
+Subject: [PATCH 2/2] Rework AVC polling timer expiry handler
+
+- Remove assert on the omanager_GetLifetime() function
+- Prevent restarting the polling timer with a zero interval
+
+Resolves: LE-9633
+Change-Id: Ic3139ecdac94e9ecaae6643ddc0f567f06417895
+---
+ avcDaemon/avcServer.c | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/avcDaemon/avcServer.c b/avcDaemon/avcServer.c
+index 25d4e9b..f97c5ab 100644
+--- a/avcDaemon/avcServer.c
++++ b/avcDaemon/avcServer.c
+@@ -1854,13 +1854,23 @@ static void PollingTimerExpiryHandler
+ 
+     // Restart the timer for the next interval
+     uint32_t pollingTimerInterval;
+-    LE_ASSERT(LE_OK == le_avc_GetPollingTimer(&pollingTimerInterval));
+-
+-    LE_INFO("A connection to server will be made in %d minutes", pollingTimerInterval);
++    if (LE_OK != le_avc_GetPollingTimer(&pollingTimerInterval))
++    {
++        LE_ERROR("Unable to get the polling time interval");
++        return;
++    }
+ 
+-    le_clk_Time_t interval = {.sec = pollingTimerInterval * SECONDS_IN_A_MIN};
+-    LE_ASSERT(LE_OK == le_timer_SetInterval(PollingTimerRef, interval));
+-    LE_ASSERT(LE_OK == le_timer_Start(PollingTimerRef));
++    if (POLLING_TIMER_DISABLED != pollingTimerInterval)
++    {
++        LE_INFO("A connection to server will be made in %d minutes", pollingTimerInterval);
++        le_clk_Time_t interval = {.sec = pollingTimerInterval * SECONDS_IN_A_MIN};
++        LE_ASSERT(LE_OK == le_timer_SetInterval(PollingTimerRef, interval));
++        LE_ASSERT(LE_OK == le_timer_Start(PollingTimerRef));
++    }
++    else
++    {
++        LE_INFO("Polling disabled");
++    }
+ }
+ 
+ //-------------------------------------------------------------------------------------------------
+-- 
+2.11.0
+
