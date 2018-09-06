@@ -1,0 +1,99 @@
+From 1b37d028b00f315325001bc3c291f7229b95247d Mon Sep 17 00:00:00 2001
+From: Bertrand Roussel <broussel@sierrawireless.com>
+Date: Thu, 23 Aug 2018 15:23:58 -0700
+Subject: [PATCH] Revert "Load SPI driver on demand, when SPI service app is
+ started."
+
+This reverts commit 12c35a71fa7b64069cef2c90c298e69e85a88030.
+
+This change was already present in the present and eventually reverted
+some other changes to fix the spiService on wp85.
+
+Resolves: LE-10952
+Change-Id: I5bdc1c1340620d3f331193eb834a1c41639941be
+---
+ apps/platformServices/spiService.adef |  3 ++-
+ default.sdef                          |  3 ++-
+ drivers/spisvc/scripts/install.sh     | 21 +++++++++++++++++++--
+ drivers/spisvc/scripts/remove.sh      |  7 +++++--
+ 4 files changed, 28 insertions(+), 6 deletions(-)
+
+diff --git a/apps/platformServices/spiService.adef b/apps/platformServices/spiService.adef
+index 056883288..24539ef8b 100644
+--- a/apps/platformServices/spiService.adef
++++ b/apps/platformServices/spiService.adef
+@@ -29,7 +29,8 @@ processes:
+ 
+ requires:
+ {
+-#if ${LEGATO_TARGET} = wp76xx
++#if ${LEGATO_FEATURE_SPISVC} = ""
++#else
+     kernelModules:
+     {
+         $LEGATO_ROOT/drivers/spisvc/spisvc.mdef
+diff --git a/default.sdef b/default.sdef
+index bb872dd8b..fab796040 100644
+--- a/default.sdef
++++ b/default.sdef
+@@ -35,7 +35,8 @@ apps:
+     $LEGATO_ROOT/apps/tools/tools
+ }
+ 
+-#if ${LEGATO_TARGET} = wp76xx
++#if ${LEGATO_FEATURE_SPISVC} = ""
++#else
+ kernelModules:
+ {
+     $LEGATO_ROOT/drivers/spisvc/spisvc.mdef
+diff --git a/drivers/spisvc/scripts/install.sh b/drivers/spisvc/scripts/install.sh
+index 8e43d7890..03ffe9253 100644
+--- a/drivers/spisvc/scripts/install.sh
++++ b/drivers/spisvc/scripts/install.sh
+@@ -1,9 +1,26 @@
+ #!/bin/sh
+ 
+-KO_PATH="$1"
++KO_PATH=$1
++
++modprobe -q spidev
+ insmod "$KO_PATH"
+ 
+-while [ -z "$(find -name "/dev/spisvc*")" ]
++# Make 10 attempts to check whether dev file exists
++# Sleep 1s in between
++
++for i in $(seq 1 10)
+ do
++  if [ ! "$(find /dev/spidev* 2> /dev/null | wc -l)" -eq "0" ]
++  then
++    exit 0
++  fi
+   sleep 1
+ done
++
++# return error if device file hasn't been created after timeout
++if [ "$i" -eq "10" ]
++then
++  exit 1
++fi
++
++exit 0
+diff --git a/drivers/spisvc/scripts/remove.sh b/drivers/spisvc/scripts/remove.sh
+index ae1477fda..027a43edf 100644
+--- a/drivers/spisvc/scripts/remove.sh
++++ b/drivers/spisvc/scripts/remove.sh
+@@ -1,5 +1,8 @@
+ #!/bin/sh
+ 
+-KO_PATH="$1"
+-rmmod "$KO_PATH"
++KO_PATH=$1
+ 
++rmmod $KO_PATH
++modprobe -rq spidev
++
++exit 0
+-- 
+2.11.0
+
