@@ -11,7 +11,7 @@ PATCH_BASE=$2
 
 if ! [ -d $LEGATO_ROOT ]
 then
-    echo "\"$LEGATO_ROOT\" does is not a directory"
+    echo "\"$LEGATO_ROOT\" is not a directory"
     exit 1
 fi
 
