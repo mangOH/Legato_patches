@@ -1,0 +1,73 @@
+From c6593cdf3917104d8f38805dd7799000a28d52f5 Mon Sep 17 00:00:00 2001
+From: Shristi Pradhan <spradhan@sierrawireless.com>
+Date: Sun, 16 Sep 2018 23:12:08 -0700
+Subject: [PATCH] [kernelModules] Install required auto load modules at system
+ startup
+
+This patch provide changes to install the auto load modules always at
+system startup. The previous behavior was to install the dependency auto
+load module only with its parent module, i.e. if the parent module is
+manual load then the required auto load module was loaded manually
+with its parent module. However, the expected behaviour is to install
+the auto load kernel modules always at system startup irrespective of
+the parent module is auto or manual load.
+
+This covers the scenario if multiple modules/devices not explicitly
+listed as modules in the definition files depends on the same auto load
+kernel module.
+
+Resolves: LE-11113
+Change-Id: I4dbc1c1564071d158cd905514be9338f64ccbdc3
+(cherry picked from commit 1f6989257bfb382ef13697469201ec0d906b7d35)
+---
+ framework/daemons/linux/supervisor/kernelModules.c | 20 ++++++--------------
+ 1 file changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/framework/daemons/linux/supervisor/kernelModules.c b/framework/daemons/linux/supervisor/kernelModules.c
+index f5e7ed8e3..4859a0c1a 100644
+--- a/framework/daemons/linux/supervisor/kernelModules.c
++++ b/framework/daemons/linux/supervisor/kernelModules.c
+@@ -863,12 +863,6 @@ static le_result_t InstallEachKernelModule(KModuleObj_t *m, bool enableUseCount)
+     ModuleLoadStatus_t loadStatusProcMod;
+     char *scriptargv[3];
+ 
+-    /* If the module is a required module, it will be loaded with its parent module. */
+-    if (m->isRequiredModule)
+-    {
+-        return LE_OK;
+-    }
+-
+     result = TraverseDependencyInsert(&ModuleInsertList, m, enableUseCount);
+     if (result != LE_OK)
+     {
+@@ -1266,12 +1260,6 @@ static le_result_t RemoveEachKernelModule(KModuleObj_t *m, bool enableUseCount)
+     char *scriptargv[3];
+     char *rmmodargv[3];
+ 
+-    /* If the module is a required module, it will be unloaded with its parent module. */
+-    if (m->isRequiredModule)
+-    {
+-        return LE_OK;
+-    }
+-
+     TraverseDependencyRemove(&ModuleRemoveList, m, enableUseCount);
+ 
+     while ((listLink = le_dls_Pop(&ModuleRemoveList)) != NULL)
+@@ -1545,8 +1533,12 @@ le_result_t le_kernelModule_Unload
+ 
+     if (moduleInfoPtr->isRequiredModule)
+     {
+-        LE_INFO("Module '%s' is a dependency module for another module.", moduleInfoPtr->name);
+-        return LE_BUSY;
++        if ((moduleInfoPtr->isLoadManual)
++            || (!moduleInfoPtr->isLoadManual && (moduleInfoPtr->useCount > 1)))
++        {
++            LE_INFO("Module '%s' is a dependency module for another module.", moduleInfoPtr->name);
++            return LE_BUSY;
++        }
+     }
+ 
+     if ((moduleInfoPtr->isLoadManual) && (moduleInfoPtr->useCount != 0))
+-- 
+2.11.0
+
